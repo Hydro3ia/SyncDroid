@@ -93,7 +93,7 @@ namespace SyncDroidWinUI.Services
 
         // About This App Card
         public string AboutSectionTitle => T("About This App", "关于此应用", "關於此應用程式");
-        public string AboutAppVersion => "Version 0.1.1.1 Release";
+        public string AboutAppVersion => "Version 0.1.2.0 Release";
         public string AboutAppDescription => T(
             "SyncDroid is a lightweight, CJK-safe folder mirror synchronization tool (/MIR) between Windows PC and Android devices over ADB.",
             "SyncDroid 是一款轻量级、完美支持中文路径的 Windows 电脑与 Android 设备 ADB 文件夹镜像同步工具 (/MIR)。",

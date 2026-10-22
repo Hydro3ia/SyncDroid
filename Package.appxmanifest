@@ -11,7 +11,7 @@
   <Identity
     Name="YirenLi.SyncDroid"
     Publisher="CN=6DA4D603-0AFF-4F5E-9C1D-66177B450C0B"
-    Version="0.1.1.1" />
+    Version="0.1.2.0" />
 
   <mp:PhoneIdentity PhoneProductId="B1B65CD9-AF41-427A-B978-0A7FBD994CF6" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
