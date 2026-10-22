@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "SyncDroidWinUI (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "SyncDroidWinUI (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

@@ -1,0 +1,247 @@
+<Page
+    x:Class="SyncDroidWinUI.Views.SyncPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:SyncDroidWinUI.Views"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:viewmodels="using:SyncDroidWinUI.ViewModels"
+    mc:Ignorable="d"
+    Background="Transparent">
+
+    <Grid Padding="12,12,12,16" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Card 1: Path Configuration -->
+        <Border
+            Grid.Row="0"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="20,16">
+            <Grid RowSpacing="10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- PC Path Panel (Row 0 when PC->Android, Row 2 when Android->PC) -->
+                <StackPanel x:Name="PcPathPanel" Grid.Row="0" Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE7F8;" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.PcDirectoryLabel, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Border x:Name="PcRoleBadge" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                            <TextBlock x:Name="PcRoleText" Text="SOURCE" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        </Border>
+                    </StackPanel>
+
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox
+                            x:Name="PcPathComboBox"
+                            Grid.Column="0"
+                            IsEditable="True"
+                            HorizontalAlignment="Stretch"
+                            PlaceholderText="{Binding Loc.PcPathPlaceholder, Mode=OneWay}"
+                            ItemsSource="{Binding PcPathHistory}"
+                            Text="{Binding PcPath, Mode=TwoWay}"
+                            SelectionChanged="PcPathComboBox_SelectionChanged"
+                            LostFocus="PcPathComboBox_LostFocus"/>
+                        <Button Grid.Column="1" Click="BrowsePcPath_Click" Padding="14,6" VerticalAlignment="Stretch">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="14"/>
+                                <TextBlock Text="{Binding Loc.BrowseButton, Mode=OneWay}"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Direction Divider -->
+                <Grid Grid.Row="1" Margin="0,2,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <Border Grid.Column="1" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="10" Padding="12,3">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE74B;" FontSize="11" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Loc.MirrorSyncBanner, Mode=OneWay}" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="2" Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                </Grid>
+
+                <!-- Android Path Panel (Row 2 when PC->Android, Row 0 when Android->PC) -->
+                <StackPanel x:Name="AndroidPathPanel" Grid.Row="2" Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE8EA;" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.AndroidDirectoryLabel, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Border x:Name="AndroidRoleBadge" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                            <TextBlock x:Name="AndroidRoleText" Text="TARGET" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        </Border>
+                    </StackPanel>
+
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox
+                            x:Name="AndroidPathComboBox"
+                            Grid.Column="0"
+                            IsEditable="True"
+                            HorizontalAlignment="Stretch"
+                            PlaceholderText="{Binding Loc.AndroidPathPlaceholder, Mode=OneWay}"
+                            ItemsSource="{Binding AndroidPathHistory}"
+                            Text="{Binding AndroidPath, Mode=TwoWay}"
+                            SelectionChanged="AndroidPathComboBox_SelectionChanged"
+                            LostFocus="AndroidPathComboBox_LostFocus"/>
+                        <Button Grid.Column="1" Click="BrowseAndroidPath_Click" Padding="14,6" VerticalAlignment="Stretch">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="14"/>
+                                <TextBlock Text="{Binding Loc.BrowseButton, Mode=OneWay}"/>
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Card 2: Sync Controls & Progress -->
+        <Border
+            Grid.Row="1"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="20,14">
+            <StackPanel Spacing="12">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10">
+                        <Button
+                            Style="{StaticResource AccentButtonStyle}"
+                            Click="StartSyncButton_Click"
+                            Padding="18,8">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE895;" FontSize="14"/>
+                                <TextBlock Text="{Binding Loc.StartSyncButton, Mode=OneWay}" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Command="{Binding CancelSyncCommand}" Padding="14,8">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE711;" FontSize="13"/>
+                                <TextBlock Text="{Binding Loc.CancelButton, Mode=OneWay}"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <TextBlock
+                            Text="{Binding StatusText, Mode=OneWay}"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <Border
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            CornerRadius="4"
+                            Padding="8,3"
+                            VerticalAlignment="Center">
+                            <TextBlock
+                                Text="{Binding ProgressText, Mode=OneWay}"
+                                FontFamily="Consolas"
+                                FontSize="12"
+                                FontWeight="SemiBold"/>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="100" MinHeight="6"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Card 3: Activity Logs -->
+        <Border
+            Grid.Row="2"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="16,12">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.ActivityLogsHeader, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button Command="{Binding ClearLogsCommand}" Padding="10,5">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.ClearLogsButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Command="{Binding CopyLogsCommand}" Padding="10,5">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE8C8;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.CopyLogsButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <Border
+                    Grid.Row="1"
+                    Background="{ThemeResource LayerFillColorAltBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="4">
+                    <ListView
+                        x:Name="LogListView"
+                        ItemsSource="{Binding Logs, Mode=OneWay}"
+                        SelectionMode="None">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="MinHeight" Value="24"/>
+                                <Setter Property="Padding" Value="8,2"/>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="12" IsTextSelectionEnabled="True"/>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>
