@@ -8,7 +8,7 @@ This document provides complete context for AI coding agents and developers cont
 - **Project Path**: `C:\Users\Yiren\SyncDroidWinUI`
 - **Target Framework**: `.NET 10.0` (`net10.0-windows10.0.26100.0`)
 - **UI Framework**: **WinUI 3** (Windows App SDK 2.x, Mica backdrop, Windows 11 card-based layout)
-- **Current Version**: `0.1.1.1 Release` (Manifest version: `0.1.1.1`)
+- **Current Version**: `0.1.2.0 Release` (Manifest version: `0.1.2.0`)
 - **Core Purpose**: Mirror-synchronize folders (`robocopy /MIR` equivalent) between a Windows PC and an Android device over **ADB** in two directions:
   1. **Tab 1 (`PC ➔ Android`)**: Push mirror (copies new/modified files to Android, skips identical files without touching them, deletes extra files on Android not present on PC).
   2. **Tab 2 (`Android ➔ PC`)**: Pull mirror (pulls new/modified files to PC, skips identical files without touching them, deletes extra files on PC not present on Android).
@@ -23,7 +23,7 @@ C:\Users\Yiren\SyncDroidWinUI\
 ├── Package.appxmanifest                 # MSIX package manifest (Identity: YirenLi.SyncDroid)
 ├── app.manifest                         # Win32 application manifest
 ├── App.xaml / App.xaml.cs               # Application entry & static MainWindow reference
-├── MainWindow.xaml / MainWindow.xaml.cs # Custom Mica title bar ("SyncDroid" + "0.1.1.1 Release" badge)
+├── MainWindow.xaml / MainWindow.xaml.cs # Custom Mica title bar ("SyncDroid" + "0.1.2.0 Release" badge)
 ├── Views/
 │   ├── MainPage.xaml(.cs)               # Top device status/selector bar, Settings toggle, TabView
 │   ├── SyncPage.xaml(.cs)               # Reusable 3-card sync view (used for both tabs)
@@ -99,7 +99,7 @@ C:\Users\Yiren\SyncDroidWinUI\
 - `Identity Name`: `YirenLi.SyncDroid`
 - `Identity Publisher`: `CN=6DA4D603-0AFF-4F5E-9C1D-66177B450C0B`
 - `PublisherDisplayName`: `Yiren Li`
-- `Version`: `0.1.1.1`
+- `Version`: `0.1.2.0`
 
 ### Building & Signing All 4 MSIX Packages (`x64` / `arm64` × `SelfContained` / `FrameworkDependent`)
 ```powershell
@@ -112,7 +112,7 @@ $dirFd = "$outDir\2_FrameworkDependent_NoDotNet"
 # Example: Build x64 Self-Contained MSIX
 Remove-Item "C:\Users\Yiren\SyncDroidWinUI\obj\AppPackages" -Recurse -Force -ErrorAction SilentlyContinue
 dotnet build "C:\Users\Yiren\SyncDroidWinUI\SyncDroidWinUI.csproj" -c Release -r win-x64 /p:Platform=x64 /p:WindowsPackageType=MSIX /p:GenerateAppxPackageOnBuild=true /p:SelfContained=true /p:WindowsAppSDKSelfContained=true /p:AppxBundle=Never /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxPackageDir="C:\Users\Yiren\SyncDroidWinUI\obj\AppPackages\"
-Copy-Item "C:\Users\Yiren\SyncDroidWinUI\obj\AppPackages\SyncDroidWinUI_0.1.1.1_x64_Test\SyncDroidWinUI_0.1.1.1_x64.msix" "$dirSc\SyncDroid_0.1.1.1_Release_x64_SelfContained.msix" -Force
-& $signtool sign /fd SHA256 /f $pfx /p "SyncDroid123" "$dirSc\SyncDroid_0.1.1.1_Release_x64_SelfContained.msix"
+Copy-Item "C:\Users\Yiren\SyncDroidWinUI\obj\AppPackages\SyncDroidWinUI_0.1.2.0_x64_Test\SyncDroidWinUI_0.1.2.0_x64.msix" "$dirSc\SyncDroid_0.1.2.0_Release_x64_SelfContained.msix" -Force
+& $signtool sign /fd SHA256 /f $pfx /p "SyncDroid123" "$dirSc\SyncDroid_0.1.2.0_Release_x64_SelfContained.msix"
 ```
 *(For `arm64`, use `-r win-arm64 /p:Platform=ARM64`; for Framework-Dependent, set `/p:SelfContained=false`.)*

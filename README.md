@@ -2,7 +2,7 @@
 
 **SyncDroid** is a modern **WinUI 3** desktop utility for mirror-synchronizing folders (`robocopy /MIR` equivalent) between a Windows PC and an Android device over **Android Debug Bridge (ADB)**.
 
-- **Current Version**: `0.1.1.1 Release`
+- **Current Version**: `0.1.2.0 Release`
 - **Privacy Policy**: [PRIVACY.md](./PRIVACY.md)
 
 ## Key Features
