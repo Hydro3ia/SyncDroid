@@ -31,7 +31,7 @@
                     Padding="8,2"
                     VerticalAlignment="Center">
                     <TextBlock
-                        Text="0.1.2.0 Release"
+                        Text="0.1.4.0 Release"
                         FontFamily="Consolas"
                         FontSize="11"
                         FontWeight="SemiBold"

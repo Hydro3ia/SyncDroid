@@ -6,12 +6,12 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="{Binding Loc.AndroidPickerTitle, Mode=OneWay}"
-    PrimaryButtonText="{Binding Loc.SelectFolderPrimaryButton, Mode=OneWay}"
+    Title="{Binding DialogTitle, Mode=OneWay}"
+    PrimaryButtonText="{Binding PrimaryActionText, Mode=OneWay}"
     CloseButtonText="{Binding Loc.CancelButton, Mode=OneWay}"
     DefaultButton="Primary">
 
-    <Grid Width="520" Height="440" RowSpacing="10">
+    <Grid Width="540" Height="450" RowSpacing="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -33,7 +33,7 @@
                 <ProgressRing x:Name="LoadingRing" Width="14" Height="14" IsActive="False" VerticalAlignment="Center" Margin="6,0,0,0"/>
             </StackPanel>
 
-            <Button Grid.Column="1" Click="NewFolderToggle_Click" Padding="10,5">
+            <Button x:Name="NewFolderToggleBtn" Grid.Column="1" Click="NewFolderToggle_Click" Padding="10,5">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <FontIcon Glyph="&#xE8F4;" FontSize="12"/>
                     <TextBlock Text="{Binding Loc.NewFolderButton, Mode=OneWay}" FontSize="12"/>
@@ -93,7 +93,7 @@
                 <TreeView.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Orientation="Horizontal" Spacing="8" Padding="2,3">
-                            <FontIcon Glyph="&#xE8B7;" FontSize="15" Foreground="#E8A838" VerticalAlignment="Center"/>
+                            <FontIcon Glyph="{Binding Content.IconGlyph}" FontSize="15" Foreground="{Binding Content.IconColor}" VerticalAlignment="Center"/>
                             <TextBlock Text="{Binding Content.DisplayName}" FontSize="13" VerticalAlignment="Center"/>
                         </StackPanel>
                     </DataTemplate>

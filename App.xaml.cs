@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 using Microsoft.UI.Xaml;
+using SyncDroidWinUI.Services;
+using System;
 
 namespace SyncDroidWinUI;
 
@@ -10,14 +12,16 @@ namespace SyncDroidWinUI;
 /// </summary>
 public partial class App : Application
 {
-    // private Window? _window; // Removed
-
     /// <summary>
     /// Initializes the singleton application object.
     /// </summary>
     public App()
     {
         InitializeComponent();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            try { AdbSyncService.Instance.ShutdownOnAppExit(); } catch { }
+        };
     }
 
     public static Window? MainWindow { get; private set; }

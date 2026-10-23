@@ -11,7 +11,7 @@
 
 2. **本地数据处理与权限说明 (`runFullTrust`)**  
    本应用声明了 Windows 桌面应用所需的 `runFullTrust` 权限，仅用于以下本地功能：
-   - 调用您电脑本地的 Android 调试桥程序（`adb.exe`）并通过本地回环接口（`127.0.0.1:5037`）与通过 USB 或局域网连接的 Android 设备通信；
+   - 调用您电脑本地的 Android 调试桥程序（`adb.exe`）与通过 USB 或局域网连接的 Android 设备通信；
    - 读取或写入您在同步任务中主动选择的本地电脑文件夹与 Android 设备文件夹。  
    所有文件对比与传输均严格在您的电脑与您的 Android 设备之间直接完成，不经过任何外部服务器。
 
@@ -30,7 +30,7 @@
 
 2. **Local Processing & Capabilities (`runFullTrust`)**  
    This application declares the `runFullTrust` capability required by WinUI 3 desktop applications solely to:
-   - Launch the local Android Debug Bridge executable (`adb.exe`) and communicate over the local loopback interface (`127.0.0.1:5037`) with your connected Android device;
+   - Launch the local Android Debug Bridge executable (`adb.exe`) to communicate with your connected Android device;
    - Read from and write to the local PC folders and Android device folders explicitly selected by you for synchronization.  
    All file scanning and transfers take place directly between your Windows PC and your Android device without passing through any external servers.
 

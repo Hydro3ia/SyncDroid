@@ -25,11 +25,20 @@ namespace SyncDroidWinUI
                 {
                     this.AppWindow.SetIcon(iconPath);
                 }
-                this.AppWindow.Resize(new Windows.Graphics.SizeInt32(940, 720));
+                this.AppWindow.Resize(new Windows.Graphics.SizeInt32(980, 750));
             }
             catch { }
 
             RootFrame.Navigate(typeof(MainPage));
+
+            this.Closed += MainWindow_Closed;
+        }
+
+        private void MainWindow_Closed(object sender, WindowEventArgs args)
+        {
+            try { CompanionSyncService.Instance.StopServer(); } catch { }
+            try { LocalSendService.Instance.StopServer(); } catch { }
+            try { AdbSyncService.Instance.ShutdownOnAppExit(); } catch { }
         }
     }
 }
