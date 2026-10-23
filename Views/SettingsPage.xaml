@@ -257,7 +257,9 @@
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
                                 FontFamily="Consolas"
-                                FontSize="12"/>
+                                FontSize="12"
+                                TextAlignment="Right"
+                                TextWrapping="Wrap"/>
                         </Grid>
 
                         <Grid ColumnSpacing="8">

@@ -318,13 +318,8 @@ namespace SyncDroidWinUI.Views
 
         private async void BrowseTargetAndroid_Click(object sender, RoutedEventArgs e)
         {
-            if (!EnsureDeviceConnected(out var mode))
-            {
-                TransferStatusText.Text = Loc.NoDeviceConnectedError;
-                return;
-            }
-
-            if (mode == ConnectionMode.LocalSend)
+            EnsureDeviceConnected(out var mode);
+            if (mode == ConnectionMode.LocalSend && LocalSendService.Instance.CurrentPeer != null)
             {
                 return;
             }
@@ -379,14 +374,17 @@ namespace SyncDroidWinUI.Views
                 return;
             }
 
-            if (!EnsureDeviceConnected(out var mode))
+            string targetDeviceDir = TargetAndroidComboBox.Text?.Trim() ?? "";
+            bool hasDevice = EnsureDeviceConnected(out var mode);
+            bool isWinTarget = CompanionSyncService.IsWindowsDrivePath(targetDeviceDir);
+
+            if (!hasDevice && !isWinTarget)
             {
                 TransferStatusText.Text = Loc.NoDeviceConnectedError;
                 AddLog(Loc.NoDeviceConnectedError);
                 return;
             }
 
-            string targetDeviceDir = TargetAndroidComboBox.Text?.Trim() ?? "";
             if (mode != ConnectionMode.LocalSend)
             {
                 if (string.IsNullOrWhiteSpace(targetDeviceDir))
@@ -468,6 +466,11 @@ namespace SyncDroidWinUI.Views
                     await CompanionSyncService.Instance.ExecuteDirectTransferToAndroidAsync(
                         snapshot, targetDeviceDir, _selectedConflictPolicy, progressCb, logCb, token);
                 }
+                else if (isWinTarget)
+                {
+                    await CompanionSyncService.Instance.ExecuteDirectTransferToWindowsPathAsync(
+                        snapshot, targetDeviceDir, _selectedConflictPolicy, progressCb, logCb, token);
+                }
                 else
                 {
                     await AdbSyncService.Instance.ExecuteDirectTransferToAndroidAsync(
@@ -502,14 +505,9 @@ namespace SyncDroidWinUI.Views
                 return;
             }
 
-            if (!EnsureDeviceConnected(out var mode))
-            {
-                TransferStatusText.Text = Loc.NoDeviceConnectedError;
-                AddLog(Loc.NoDeviceConnectedError);
-                return;
-            }
+            bool hasDevice = EnsureDeviceConnected(out var mode);
 
-            if (mode == ConnectionMode.LocalSend)
+            if (hasDevice && mode == ConnectionMode.LocalSend)
             {
                 AddLog(Loc.LocalSendPullNotSupported);
                 var infoDialog = new ContentDialog
@@ -538,6 +536,14 @@ namespace SyncDroidWinUI.Views
 
                 string remotePath = picker.SelectedPath;
                 bool isDir = picker.SelectedIsDirectory;
+                bool isWinPath = CompanionSyncService.IsWindowsDrivePath(remotePath);
+
+                if (!hasDevice && !isWinPath)
+                {
+                    TransferStatusText.Text = Loc.NoDeviceConnectedError;
+                    AddLog(Loc.NoDeviceConnectedError);
+                    return;
+                }
 
                 var hwnd = App.MainWindow != null ? WinRT.Interop.WindowNative.GetWindowHandle(App.MainWindow) : IntPtr.Zero;
                 var pcTargetDir = FolderPickerHelper.PickFolder(hwnd);
@@ -555,9 +561,14 @@ namespace SyncDroidWinUI.Views
                 Action<int> progressCb = p => _dispatcherQueue?.TryEnqueue(() => SetProgress(p));
                 Action<string> logCb = msg => _dispatcherQueue?.TryEnqueue(() => AddLog(msg));
 
-                if (mode == ConnectionMode.WirelessCompanion)
+                if (hasDevice && mode == ConnectionMode.WirelessCompanion)
                 {
                     await CompanionSyncService.Instance.ExecuteDirectPullFromAndroidAsync(
+                        remotePath, isDir, pcTargetDir, _selectedConflictPolicy, progressCb, logCb, token);
+                }
+                else if (isWinPath)
+                {
+                    await CompanionSyncService.Instance.ExecuteDirectPullFromWindowsPathAsync(
                         remotePath, isDir, pcTargetDir, _selectedConflictPolicy, progressCb, logCb, token);
                 }
                 else

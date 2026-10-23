@@ -2,7 +2,7 @@
 
 **SyncDroid** is a modern **WinUI 3** desktop utility for synchronizing folders (`/MIR` Mirror Sync & Incremental Merge) and transferring files/folders between a Windows PC and an Android device over **USB ADB** or **Wireless Companion (LAN / Wi-Fi)**.
 
-- **Current Version**: `0.1.4.0 Release`
+- **Current Version**: `0.1.5.0 Release`
 - **Privacy Policy**: [PRIVACY.md](./PRIVACY.md)
 
 ## Key Features

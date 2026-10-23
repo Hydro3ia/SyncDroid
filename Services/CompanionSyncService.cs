@@ -21,7 +21,7 @@ namespace SyncDroidWinUI.Services
     {
         public const int UdpDiscoveryPort = 45820;
         public const int DefaultTcpPort = 45821;
-        public const string AppVersion = "0.1.4.0";
+        public const string AppVersion = "0.1.5.0";
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -982,16 +982,117 @@ namespace SyncDroidWinUI.Services
             try
             {
                 if (forceRefresh) ClearDirectoryCache();
-                await GetRemoteSubdirectoriesAsync("/storage/emulated/0", forceRefresh);
+                if (string.Equals(peer.Platform, "Windows", StringComparison.OrdinalIgnoreCase))
+                {
+                    await GetRemoteWindowsDrivesAsync(forceRefresh);
+                }
+                else
+                {
+                    await GetRemoteSubdirectoriesAsync("/storage/emulated/0", forceRefresh);
+                }
             }
             catch { }
+        }
+
+        public static bool IsWindowsDrivePath(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            string trimmed = path.Trim();
+            if (trimmed.Length >= 3 && trimmed[0] == '/' && char.IsLetter(trimmed[1]) && trimmed[2] == ':')
+            {
+                trimmed = trimmed.Substring(1);
+            }
+            return trimmed.Length >= 2 && char.IsLetter(trimmed[0]) && trimmed[1] == ':' &&
+                   (trimmed.Length == 2 || trimmed[2] == '\\' || trimmed[2] == '/');
+        }
+
+        public static string NormalizeRemoteTargetPath(string? rawPath)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath)) return "";
+            string trimmed = rawPath.Trim();
+            if (trimmed == "/" || trimmed == "\\") return "/";
+
+            if (IsWindowsDrivePath(trimmed))
+            {
+                if (trimmed[0] == '/') trimmed = trimmed.Substring(1);
+                string win = trimmed.Replace('/', '\\').TrimEnd('\\');
+                if (win.Length == 2 && char.IsLetter(win[0]) && win[1] == ':')
+                {
+                    return char.ToUpperInvariant(win[0]) + ":\\";
+                }
+                return char.ToUpperInvariant(win[0]) + win.Substring(1);
+            }
+
+            string posix = trimmed.Replace('\\', '/').TrimEnd('/');
+            return string.IsNullOrEmpty(posix) ? "/" : posix;
+        }
+
+        public static string CombineRemotePath(string baseRemotePath, string relativePath)
+        {
+            string rel = relativePath.TrimStart('\\', '/');
+            if (IsWindowsDrivePath(baseRemotePath))
+            {
+                string cleanBase = NormalizeRemoteTargetPath(baseRemotePath).TrimEnd('\\');
+                return string.IsNullOrEmpty(rel)
+                    ? cleanBase + "\\"
+                    : $"{cleanBase}\\{rel.Replace('/', '\\')}";
+            }
+            else
+            {
+                string cleanBase = baseRemotePath.Trim().Replace('\\', '/').TrimEnd('/');
+                return string.IsNullOrEmpty(cleanBase)
+                    ? $"/{rel.Replace('\\', '/')}"
+                    : $"{cleanBase}/{rel.Replace('\\', '/')}";
+            }
+        }
+
+        public async Task<List<string>> GetRemoteWindowsDrivesAsync(bool forceRefresh = false, CancellationToken ct = default)
+        {
+            var peer = CurrentPeer;
+            if (peer == null) return new List<string>();
+
+            string cacheKey = $"{peer.Endpoint}:__WIN_DRIVES__";
+            if (!forceRefresh)
+            {
+                lock (_cacheLock)
+                {
+                    if (_directoryCache.TryGetValue(cacheKey, out var cached))
+                    {
+                        return cached.ToList();
+                    }
+                }
+            }
+
+            var drives = new List<string>();
+            try
+            {
+                var listing = await GetRemoteDirectoryListingAsync("/", includeFiles: false, ct);
+                foreach (var entry in listing.Entries)
+                {
+                    string candidate = !string.IsNullOrWhiteSpace(entry.FullPath) ? entry.FullPath : entry.Name;
+                    if (entry.IsDirectory && IsWindowsDrivePath(candidate))
+                    {
+                        string normalizedDrive = NormalizeRemoteTargetPath(candidate);
+                        if (!drives.Contains(normalizedDrive, StringComparer.OrdinalIgnoreCase))
+                        {
+                            drives.Add(normalizedDrive);
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            lock (_cacheLock)
+            {
+                _directoryCache[cacheKey] = drives;
+            }
+            return drives;
         }
 
         public async Task<DirectoryListingResponse> GetRemoteDirectoryListingAsync(string remotePath, bool includeFiles, CancellationToken ct = default)
         {
             var peer = CurrentPeer ?? throw new InvalidOperationException("No wireless companion device connected.");
-            string normalized = string.IsNullOrWhiteSpace(remotePath) ? "/storage/emulated/0" : remotePath.Replace('\\', '/').TrimEnd('/');
-            if (string.IsNullOrEmpty(normalized)) normalized = "/";
+            string normalized = string.IsNullOrWhiteSpace(remotePath) ? "/" : NormalizeRemoteTargetPath(remotePath);
 
             string url = $"http://{peer.Endpoint}/api/v1/storage/list?path={Uri.EscapeDataString(normalized)}&includeFiles={includeFiles.ToString().ToLowerInvariant()}";
             using var resp = await _httpClient.GetAsync(url, ct);
@@ -1006,8 +1107,7 @@ namespace SyncDroidWinUI.Services
             var peer = CurrentPeer;
             if (peer == null) return new List<string>();
 
-            string normalized = string.IsNullOrWhiteSpace(remotePath) ? "/storage" : remotePath.Replace('\\', '/').TrimEnd('/');
-            if (string.IsNullOrEmpty(normalized)) normalized = "/";
+            string normalized = string.IsNullOrWhiteSpace(remotePath) ? "/storage" : NormalizeRemoteTargetPath(remotePath);
 
             string cacheKey = $"{peer.Endpoint}:{normalized}";
             if (!forceRefresh)
@@ -1021,7 +1121,7 @@ namespace SyncDroidWinUI.Services
                 }
             }
 
-            var dirs = new HashSet<string>(StringComparer.Ordinal);
+            var dirs = new HashSet<string>(IsWindowsDrivePath(normalized) ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
             if (normalized == "/storage")
             {
                 dirs.Add("emulated");
@@ -1038,7 +1138,7 @@ namespace SyncDroidWinUI.Services
                 {
                     if (entry.IsDirectory && !string.IsNullOrWhiteSpace(entry.Name) && entry.Name != "." && entry.Name != "..")
                     {
-                        dirs.Add(entry.Name.Trim('/'));
+                        dirs.Add(entry.Name.Trim('/', '\\'));
                     }
                 }
             }
@@ -1055,14 +1155,14 @@ namespace SyncDroidWinUI.Services
         public async Task<string> CreateRemoteDirectoryAsync(string parentPath, string newFolderName, CancellationToken ct = default)
         {
             var peer = CurrentPeer ?? throw new InvalidOperationException("No wireless companion device connected.");
-            string cleanParent = string.IsNullOrWhiteSpace(parentPath) ? "/storage/emulated/0" : parentPath.Replace('\\', '/').TrimEnd('/');
+            string cleanParent = string.IsNullOrWhiteSpace(parentPath) ? "/storage/emulated/0" : NormalizeRemoteTargetPath(parentPath);
             string cleanName = newFolderName.Replace('\\', '/').Trim('/');
             if (string.IsNullOrWhiteSpace(cleanName))
             {
                 throw new InvalidOperationException("Folder name cannot be empty.");
             }
 
-            string fullPath = $"{cleanParent}/{cleanName}";
+            string fullPath = CombineRemotePath(cleanParent, cleanName);
             await CreateRemoteDirectoryFullPathAsync(peer, fullPath, ct);
 
             lock (_cacheLock)
@@ -1275,7 +1375,7 @@ namespace SyncDroidWinUI.Services
             var peer = CurrentPeer ?? throw new InvalidOperationException("No wireless companion device connected.");
 
             pcPath = Path.GetFullPath(pcPath.Trim());
-            androidPath = androidPath.Replace('\\', '/').TrimEnd('/');
+            androidPath = NormalizeRemoteTargetPath(androidPath);
 
             logCallback($"[Wireless Companion: {peer.DeviceName}] Scanning PC directory: {pcPath}");
             var localFiles = Directory.GetFiles(pcPath, "*.*", SearchOption.AllDirectories)
@@ -1289,7 +1389,7 @@ namespace SyncDroidWinUI.Services
 
             await CreateRemoteDirectoryFullPathAsync(peer, androidPath, token);
 
-            logCallback($"[Wireless Companion: {peer.DeviceName}] Scanning Android directory: {androidPath}");
+            logCallback($"[Wireless Companion: {peer.DeviceName}] Scanning Target directory: {androidPath}");
             var remoteTree = await GetRemoteTreeAsync(peer, androidPath, token);
 
             var remoteFilesByRelPath = new Dictionary<string, RemoteEntryDto>(StringComparer.OrdinalIgnoreCase);
@@ -1298,7 +1398,7 @@ namespace SyncDroidWinUI.Services
                 string rel = !string.IsNullOrWhiteSpace(entry.RelativePath)
                     ? entry.RelativePath.Replace('\\', '/').TrimStart('/')
                     : (entry.FullPath.StartsWith(androidPath, StringComparison.OrdinalIgnoreCase)
-                        ? entry.FullPath.Substring(androidPath.Length).TrimStart('/')
+                        ? entry.FullPath.Substring(androidPath.Length).Replace('\\', '/').TrimStart('/')
                         : entry.Name);
                 if (!string.IsNullOrEmpty(rel))
                 {
@@ -1323,7 +1423,7 @@ namespace SyncDroidWinUI.Services
                     continue;
                 }
 
-                var targetRemotePath = $"{androidPath}/{relativePath}";
+                var targetRemotePath = CombineRemotePath(androidPath, relativePath);
                 var fileInfo = new FileInfo(localFile);
                 bool shouldPush = true;
 
@@ -1354,7 +1454,7 @@ namespace SyncDroidWinUI.Services
 
                 var filesToDelete = remoteFilesByRelPath
                     .Where(kvp => !localRelSet.Contains(kvp.Key))
-                    .Select(kvp => !string.IsNullOrWhiteSpace(kvp.Value.FullPath) ? kvp.Value.FullPath : $"{androidPath}/{kvp.Key}")
+                    .Select(kvp => !string.IsNullOrWhiteSpace(kvp.Value.FullPath) ? kvp.Value.FullPath : CombineRemotePath(androidPath, kvp.Key))
                     .ToList();
 
                 int deleteTotal = filesToDelete.Count;
@@ -1371,10 +1471,10 @@ namespace SyncDroidWinUI.Services
             }
             else
             {
-                logCallback("Incremental Merge mode: Keeping existing extra files on Android.");
+                logCallback("Incremental Merge mode: Keeping existing extra files on Target.");
             }
 
-            logCallback("Sync (PC to Android) completed successfully.");
+            logCallback("Push Sync completed successfully.");
             progressCallback(100);
         }
 
@@ -1389,10 +1489,10 @@ namespace SyncDroidWinUI.Services
             var peer = CurrentPeer ?? throw new InvalidOperationException("No wireless companion device connected.");
 
             pcPath = Path.GetFullPath(pcPath.Trim());
-            androidPath = androidPath.Replace('\\', '/').TrimEnd('/');
+            androidPath = NormalizeRemoteTargetPath(androidPath);
             Directory.CreateDirectory(pcPath);
 
-            logCallback($"[Wireless Companion: {peer.DeviceName}] Scanning Android directory: {androidPath}");
+            logCallback($"[Wireless Companion: {peer.DeviceName}] Scanning Target directory: {androidPath}");
             var remoteTree = await GetRemoteTreeAsync(peer, androidPath, token);
 
             logCallback($"Scanning PC directory: {pcPath}");
@@ -1420,7 +1520,7 @@ namespace SyncDroidWinUI.Services
                 string rawRelPath = !string.IsNullOrWhiteSpace(entry.RelativePath)
                     ? entry.RelativePath.Replace('\\', '/').TrimStart('/')
                     : (entry.FullPath.StartsWith(androidPath, StringComparison.OrdinalIgnoreCase)
-                        ? entry.FullPath.Substring(androidPath.Length).TrimStart('/')
+                        ? entry.FullPath.Substring(androidPath.Length).Replace('\\', '/').TrimStart('/')
                         : entry.Name);
 
                 string sanitizedRelPath = SanitizeRelativePathForWindows(rawRelPath);
@@ -1442,7 +1542,7 @@ namespace SyncDroidWinUI.Services
                     logCallback($"Pulling: {sanitizedRelPath}");
                     string remoteFullPath = !string.IsNullOrWhiteSpace(entry.FullPath)
                         ? entry.FullPath
-                        : $"{androidPath}/{rawRelPath}";
+                        : CombineRemotePath(androidPath, rawRelPath);
                     await PullFileFromPeerAsync(peer, remoteFullPath, targetLocalPath, entry.LastWriteTimeUtcTicks, token, logCallback);
                 }
 
@@ -1470,7 +1570,7 @@ namespace SyncDroidWinUI.Services
                 logCallback("Incremental Merge mode: Keeping existing extra files on PC.");
             }
 
-            logCallback("Sync (Android to PC) completed successfully.");
+            logCallback("Pull Sync completed successfully.");
             progressCallback(100);
         }
 
@@ -1483,7 +1583,7 @@ namespace SyncDroidWinUI.Services
             CancellationToken token)
         {
             var peer = CurrentPeer ?? throw new InvalidOperationException("No wireless companion device connected.");
-            targetAndroidDir = targetAndroidDir.Replace('\\', '/').TrimEnd('/');
+            targetAndroidDir = NormalizeRemoteTargetPath(targetAndroidDir);
 
             await CreateRemoteDirectoryFullPathAsync(peer, targetAndroidDir, token);
 
@@ -1509,7 +1609,7 @@ namespace SyncDroidWinUI.Services
                     continue;
                 }
 
-                string remoteFullPath = $"{targetAndroidDir}/{relativeDestPath}";
+                string remoteFullPath = CombineRemotePath(targetAndroidDir, relativeDestPath);
                 logCallback($"Pushing ({conflictPolicy}): {relativeDestPath}");
                 await PushFileToPeerAsync(peer, fileInfo, remoteFullPath, conflictPolicy, token, logCallback);
 
@@ -1531,11 +1631,16 @@ namespace SyncDroidWinUI.Services
             CancellationToken token)
         {
             var peer = CurrentPeer ?? throw new InvalidOperationException("No wireless companion device connected.");
-            remoteItemPath = remoteItemPath.Replace('\\', '/').TrimEnd('/');
+            remoteItemPath = NormalizeRemoteTargetPath(remoteItemPath);
             targetPcDir = Path.GetFullPath(targetPcDir.Trim());
             Directory.CreateDirectory(targetPcDir);
 
-            string itemName = Path.GetFileName(remoteItemPath);
+            string trimmedItem = remoteItemPath.TrimEnd('\\', '/');
+            string itemName = Path.GetFileName(trimmedItem);
+            if (string.IsNullOrWhiteSpace(itemName) && IsWindowsDrivePath(remoteItemPath))
+            {
+                itemName = $"Drive_{char.ToUpperInvariant(remoteItemPath.TrimStart('/')[0])}";
+            }
 
             if (!isDirectory)
             {
@@ -1585,7 +1690,7 @@ namespace SyncDroidWinUI.Services
 
                 string remoteFull = !string.IsNullOrWhiteSpace(entry.FullPath)
                     ? entry.FullPath
-                    : $"{remoteItemPath}/{rawRel}";
+                    : CombineRemotePath(remoteItemPath, rawRel);
                 logCallback($"Pulling: {rootFolderName}/{sanitizedRel}");
                 await PullFileFromPeerAsync(peer, remoteFull, localTarget, entry.LastWriteTimeUtcTicks, token, logCallback);
 
@@ -1613,6 +1718,10 @@ namespace SyncDroidWinUI.Services
                 else if (Directory.Exists(full))
                 {
                     string folderName = Path.GetFileName(full.TrimEnd('\\', '/'));
+                    if (string.IsNullOrWhiteSpace(folderName) && IsWindowsDrivePath(full))
+                    {
+                        folderName = $"Drive_{char.ToUpperInvariant(full[0])}";
+                    }
                     foreach (var file in Directory.GetFiles(full, "*.*", SearchOption.AllDirectories))
                     {
                         var name = Path.GetFileName(file);
@@ -1628,6 +1737,275 @@ namespace SyncDroidWinUI.Services
                 }
             }
             return list;
+        }
+
+        public async Task SyncWindowsPathAsync(
+            string sourcePath,
+            string targetPath,
+            bool isMirrorMode,
+            Action<int> progressCallback,
+            Action<string> logCallback,
+            CancellationToken token)
+        {
+            bool verifyHash = SettingsService.Load().VerifyHashAfterTransfer;
+            sourcePath = Path.GetFullPath(NormalizeRemoteTargetPath(sourcePath));
+            targetPath = Path.GetFullPath(NormalizeRemoteTargetPath(targetPath));
+
+            if (!Directory.Exists(sourcePath))
+            {
+                throw new DirectoryNotFoundException($"Source directory does not exist: {sourcePath}");
+            }
+            Directory.CreateDirectory(targetPath);
+
+            logCallback($"Scanning Source directory: {sourcePath}");
+            var sourceFiles = Directory.GetFiles(sourcePath, "*.*", SearchOption.AllDirectories)
+                .Where(f =>
+                {
+                    var name = Path.GetFileName(f);
+                    return !(name.StartsWith(".syncdroid_", StringComparison.OrdinalIgnoreCase) &&
+                             name.EndsWith(".part", StringComparison.OrdinalIgnoreCase));
+                })
+                .ToArray();
+
+            logCallback($"Scanning Target directory: {targetPath}");
+            var targetFiles = Directory.Exists(targetPath)
+                ? Directory.GetFiles(targetPath, "*.*", SearchOption.AllDirectories)
+                    .Where(f =>
+                    {
+                        var name = Path.GetFileName(f);
+                        return !(name.StartsWith(".syncdroid_", StringComparison.OrdinalIgnoreCase) &&
+                                 name.EndsWith(".part", StringComparison.OrdinalIgnoreCase));
+                    })
+                    .ToArray()
+                : Array.Empty<string>();
+            var targetFilesInfo = targetFiles.ToDictionary(f => f, f => new FileInfo(f), StringComparer.OrdinalIgnoreCase);
+
+            int totalFiles = sourceFiles.Length;
+            int processed = 0;
+            int phase1Weight = isMirrorMode ? 50 : 100;
+            var expectedTargetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var srcFile in sourceFiles)
+            {
+                token.ThrowIfCancellationRequested();
+                var relPath = Path.GetRelativePath(sourcePath, srcFile);
+                var destFile = Path.Combine(targetPath, relPath);
+                expectedTargetPaths.Add(destFile);
+
+                var srcInfo = new FileInfo(srcFile);
+                bool shouldCopy = true;
+                if (targetFilesInfo.TryGetValue(destFile, out var destInfo) && destInfo.Length == srcInfo.Length)
+                {
+                    shouldCopy = false;
+                    logCallback($"Skipped (Identical): {relPath.Replace('\\', '/')}");
+                }
+
+                if (shouldCopy)
+                {
+                    logCallback($"Copying: {relPath.Replace('\\', '/')}");
+                    await CopyWindowsFileWithVerificationAsync(srcFile, destFile, verifyHash, logCallback, token);
+                }
+
+                processed++;
+                progressCallback((processed * phase1Weight) / (totalFiles > 0 ? totalFiles : 1));
+            }
+
+            if (isMirrorMode)
+            {
+                var filesToDelete = targetFiles.Where(f => !expectedTargetPaths.Contains(f)).ToList();
+                int deleteTotal = filesToDelete.Count;
+                int deleteProcessed = 0;
+                foreach (var extra in filesToDelete)
+                {
+                    token.ThrowIfCancellationRequested();
+                    logCallback($"Deleting extra file: {extra}");
+                    File.Delete(extra);
+                    deleteProcessed++;
+                    progressCallback(50 + (deleteProcessed * 50) / (deleteTotal > 0 ? deleteTotal : 1));
+                }
+            }
+            else
+            {
+                logCallback("Incremental Merge mode: Keeping existing extra files on Target.");
+            }
+
+            logCallback("Sync completed successfully.");
+            progressCallback(100);
+        }
+
+        public async Task ExecuteDirectTransferToWindowsPathAsync(
+            IReadOnlyList<TransferQueueItem> queueItems,
+            string targetDir,
+            ConflictPolicy conflictPolicy,
+            Action<int> progressCallback,
+            Action<string> logCallback,
+            CancellationToken token)
+        {
+            bool verifyHash = SettingsService.Load().VerifyHashAfterTransfer;
+            targetDir = Path.GetFullPath(NormalizeRemoteTargetPath(targetDir));
+            Directory.CreateDirectory(targetDir);
+
+            var filePlan = ExpandQueueItemsToFiles(queueItems);
+            int total = filePlan.Count;
+            if (total == 0)
+            {
+                logCallback("No files found in the selected queue items.");
+                progressCallback(100);
+                return;
+            }
+
+            int processed = 0;
+            foreach (var (fileInfo, relativeDestPath) in filePlan)
+            {
+                token.ThrowIfCancellationRequested();
+                string destFullPath = Path.Combine(targetDir, relativeDestPath.Replace('/', '\\'));
+
+                if (File.Exists(destFullPath))
+                {
+                    if (conflictPolicy == ConflictPolicy.SkipIdenticalSize && new FileInfo(destFullPath).Length == fileInfo.Length)
+                    {
+                        logCallback($"Skipped (Identical): {relativeDestPath}");
+                        processed++;
+                        progressCallback((processed * 100) / total);
+                        continue;
+                    }
+                    if (conflictPolicy == ConflictPolicy.KeepBothRename)
+                    {
+                        destFullPath = GetUniqueKeepBothLocalPath(destFullPath);
+                    }
+                }
+
+                logCallback($"Transferring: {relativeDestPath}");
+                await CopyWindowsFileWithVerificationAsync(fileInfo.FullName, destFullPath, verifyHash, logCallback, token);
+
+                processed++;
+                progressCallback((processed * 100) / total);
+            }
+
+            logCallback($"Direct transfer completed ({processed} file(s) processed).");
+            progressCallback(100);
+        }
+
+        public async Task ExecuteDirectPullFromWindowsPathAsync(
+            string sourceItemPath,
+            bool isDirectory,
+            string targetPcDir,
+            ConflictPolicy conflictPolicy,
+            Action<int> progressCallback,
+            Action<string> logCallback,
+            CancellationToken token)
+        {
+            bool verifyHash = SettingsService.Load().VerifyHashAfterTransfer;
+            sourceItemPath = Path.GetFullPath(NormalizeRemoteTargetPath(sourceItemPath));
+            targetPcDir = Path.GetFullPath(targetPcDir.Trim());
+            Directory.CreateDirectory(targetPcDir);
+
+            string itemName = Path.GetFileName(sourceItemPath.TrimEnd('\\', '/'));
+            if (string.IsNullOrWhiteSpace(itemName) && IsWindowsDrivePath(sourceItemPath))
+            {
+                itemName = $"Drive_{char.ToUpperInvariant(sourceItemPath[0])}";
+            }
+
+            if (!isDirectory)
+            {
+                string destFile = Path.Combine(targetPcDir, itemName);
+                if (File.Exists(destFile) && conflictPolicy == ConflictPolicy.KeepBothRename)
+                {
+                    destFile = GetUniqueKeepBothLocalPath(destFile);
+                }
+
+                logCallback($"Pulling file: {sourceItemPath}");
+                await CopyWindowsFileWithVerificationAsync(sourceItemPath, destFile, verifyHash, logCallback, token);
+                progressCallback(100);
+                logCallback($"Pulled to: {destFile}");
+                return;
+            }
+
+            var files = Directory.GetFiles(sourceItemPath, "*.*", SearchOption.AllDirectories)
+                .Where(f =>
+                {
+                    var name = Path.GetFileName(f);
+                    return !(name.StartsWith(".syncdroid_", StringComparison.OrdinalIgnoreCase) &&
+                             name.EndsWith(".part", StringComparison.OrdinalIgnoreCase));
+                })
+                .ToArray();
+
+            int total = files.Length;
+            int processed = 0;
+            foreach (var srcFile in files)
+            {
+                token.ThrowIfCancellationRequested();
+                string rel = Path.GetRelativePath(sourceItemPath, srcFile);
+                string destFile = Path.Combine(targetPcDir, itemName, rel);
+
+                if (File.Exists(destFile))
+                {
+                    if (conflictPolicy == ConflictPolicy.SkipIdenticalSize && new FileInfo(destFile).Length == new FileInfo(srcFile).Length)
+                    {
+                        logCallback($"Skipped (Identical): {itemName}/{rel.Replace('\\', '/')}");
+                        processed++;
+                        progressCallback((processed * 100) / (total > 0 ? total : 1));
+                        continue;
+                    }
+                    if (conflictPolicy == ConflictPolicy.KeepBothRename)
+                    {
+                        destFile = GetUniqueKeepBothLocalPath(destFile);
+                    }
+                }
+
+                logCallback($"Pulling: {itemName}/{rel.Replace('\\', '/')}");
+                await CopyWindowsFileWithVerificationAsync(srcFile, destFile, verifyHash, logCallback, token);
+                processed++;
+                progressCallback((processed * 100) / (total > 0 ? total : 1));
+            }
+
+            logCallback($"Direct pull from device completed ({processed} file(s)).");
+            progressCallback(100);
+        }
+
+        private static async Task CopyWindowsFileWithVerificationAsync(
+            string sourceFile,
+            string destFile,
+            bool verifyHash,
+            Action<string> logCallback,
+            CancellationToken token)
+        {
+            string parentDir = Path.GetDirectoryName(destFile) ?? @"C:\";
+            Directory.CreateDirectory(parentDir);
+            string tempPart = Path.Combine(parentDir, $".syncdroid_{Guid.NewGuid():N}.part");
+
+            try
+            {
+                await using (var srcStream = new FileStream(sourceFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, useAsync: true))
+                await using (var dstStream = new FileStream(tempPart, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
+                {
+                    await srcStream.CopyToAsync(dstStream, 65536, token);
+                }
+
+                if (verifyHash)
+                {
+                    string srcHash = await FileHashHelper.ComputeFileSha256Async(sourceFile, token);
+                    string dstHash = await FileHashHelper.ComputeFileSha256Async(tempPart, token);
+                    if (!string.Equals(srcHash, dstHash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { File.Delete(tempPart); } catch { }
+                        throw new IOException($"Hash verification failed (SHA-256) for '{Path.GetFileName(destFile)}'.");
+                    }
+                    logCallback($"Hash verified (SHA-256): {Path.GetFileName(destFile)}");
+                }
+
+                File.Move(tempPart, destFile, overwrite: true);
+                try
+                {
+                    File.SetLastWriteTimeUtc(destFile, File.GetLastWriteTimeUtc(sourceFile));
+                }
+                catch { }
+            }
+            catch
+            {
+                try { if (File.Exists(tempPart)) File.Delete(tempPart); } catch { }
+                throw;
+            }
         }
 
         #endregion

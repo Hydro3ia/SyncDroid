@@ -4,6 +4,7 @@ using SyncDroidWinUI.Models;
 using SyncDroidWinUI.Services;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -14,8 +15,9 @@ namespace SyncDroidWinUI.Views
         public string DisplayName { get; set; } = "";
         public string FullPath { get; set; } = "";
         public bool IsDirectory { get; set; } = true;
-        public string IconGlyph => IsDirectory ? "\uE8B7" : "\uE8A5";
-        public string IconColor => IsDirectory ? "#E8A838" : "#6495ED";
+        public bool IsDrive { get; set; }
+        public string IconGlyph => IsDrive ? "\uEDA2" : (IsDirectory ? "\uE8B7" : "\uE8A5");
+        public string IconColor => IsDrive ? "#4CC2FF" : (IsDirectory ? "#E8A838" : "#6495ED");
 
         public override string ToString() => DisplayName;
     }
@@ -25,6 +27,8 @@ namespace SyncDroidWinUI.Views
         public LocalizationService Loc => LocalizationService.Instance;
 
         private readonly bool _allowFileSelection;
+        private bool _isUpdatingRootSelector;
+        private bool _remoteHasWindowsDrives;
 
         public string DialogTitle => _allowFileSelection ? Loc.AndroidPullPickerTitle : Loc.AndroidPickerTitle;
         public string PrimaryActionText => _allowFileSelection ? Loc.SelectItemPrimaryButton : Loc.SelectFolderPrimaryButton;
@@ -41,6 +45,10 @@ namespace SyncDroidWinUI.Views
             CompanionSyncService.Instance.ActiveConnectionMode == ConnectionMode.WirelessCompanion &&
             CompanionSyncService.Instance.CurrentPeer != null;
 
+        private bool HasOnlineAdbDevice =>
+            AdbSyncService.Instance.CurrentDevice != null &&
+            AdbSyncService.Instance.CurrentDevice.State == SharpAdbClient.DeviceState.Online;
+
         public AndroidFolderPickerDialog(string? initialPath = null, bool allowFileSelection = false)
         {
             _allowFileSelection = allowFileSelection;
@@ -52,10 +60,14 @@ namespace SyncDroidWinUI.Views
                 var peer = CompanionSyncService.Instance.CurrentPeer!;
                 DeviceNameText.Text = peer.DisplayName;
             }
+            else if (HasOnlineAdbDevice)
+            {
+                var dev = AdbSyncService.Instance.CurrentDevice!;
+                DeviceNameText.Text = $"[ADB] {dev.Model} ({dev.Serial})";
+            }
             else
             {
-                var dev = AdbSyncService.Instance.CurrentDevice;
-                DeviceNameText.Text = dev != null ? $"[ADB] {dev.Model} ({dev.Serial})" : "";
+                DeviceNameText.Text = $"{Environment.MachineName} (Windows Drives)";
             }
 
             if (_allowFileSelection)
@@ -80,6 +92,32 @@ namespace SyncDroidWinUI.Views
             await LoadStorageTreeAsync(forceRefresh: false);
         }
 
+        private static List<string> GetLocalWindowsDrives()
+        {
+            var list = new List<string>();
+            try
+            {
+                foreach (var d in DriveInfo.GetDrives())
+                {
+                    try
+                    {
+                        if (d.IsReady)
+                        {
+                            list.Add(d.RootDirectory.FullName);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+
+            if (list.Count == 0)
+            {
+                list.Add(@"C:\");
+            }
+            return list;
+        }
+
         private async Task LoadStorageTreeAsync(bool forceRefresh)
         {
             try
@@ -96,44 +134,127 @@ namespace SyncDroidWinUI.Views
                         AdbSyncService.Instance.ClearDirectoryCache();
                 }
 
-                var rootFolder = new AndroidFolderNode
+                var winDrives = new List<string>();
+                _remoteHasWindowsDrives = false;
+
+                if (IsWirelessMode)
                 {
-                    DisplayName = "/storage",
-                    FullPath = "/storage",
-                    IsDirectory = true
-                };
-
-                var rootNode = new TreeViewNode
-                {
-                    Content = rootFolder,
-                    HasUnrealizedChildren = true
-                };
-
-                StorageTreeView.RootNodes.Add(rootNode);
-
-                await PopulateNodeChildrenAsync(rootNode, forceRefresh);
-                rootNode.IsExpanded = true;
-
-                // Automatically expand /storage/emulated and /storage/emulated/0 for convenience
-                var emulatedNode = rootNode.Children.FirstOrDefault(
-                    n => (n.Content as AndroidFolderNode)?.DisplayName == "emulated");
-                if (emulatedNode != null)
-                {
-                    await PopulateNodeChildrenAsync(emulatedNode, forceRefresh);
-                    emulatedNode.IsExpanded = true;
-
-                    var zeroNode = emulatedNode.Children.FirstOrDefault(
-                        n => (n.Content as AndroidFolderNode)?.DisplayName == "0");
-                    if (zeroNode != null)
+                    var remoteDrives = await CompanionSyncService.Instance.GetRemoteWindowsDrivesAsync(forceRefresh);
+                    if (remoteDrives.Count > 0)
                     {
-                        await PopulateNodeChildrenAsync(zeroNode, forceRefresh);
-                        zeroNode.IsExpanded = true;
-                        _selectedTreeNode = zeroNode;
+                        _remoteHasWindowsDrives = true;
+                        winDrives.AddRange(remoteDrives);
                     }
+                }
+
+                if (winDrives.Count == 0)
+                {
+                    winDrives.AddRange(GetLocalWindowsDrives());
+                }
+
+                bool hasAndroidStorage = (IsWirelessMode && !_remoteHasWindowsDrives) || (!IsWirelessMode && HasOnlineAdbDevice);
+
+                var rootOptions = new List<string>();
+                TreeViewNode? storageRootNode = null;
+
+                if (hasAndroidStorage)
+                {
+                    rootOptions.Add("/storage");
+                    var rootFolder = new AndroidFolderNode
+                    {
+                        DisplayName = "/storage",
+                        FullPath = "/storage",
+                        IsDirectory = true,
+                        IsDrive = false
+                    };
+
+                    storageRootNode = new TreeViewNode
+                    {
+                        Content = rootFolder,
+                        HasUnrealizedChildren = true
+                    };
+                    StorageTreeView.RootNodes.Add(storageRootNode);
+                }
+
+                var driveNodes = new Dictionary<string, TreeViewNode>(StringComparer.OrdinalIgnoreCase);
+                foreach (var drive in winDrives)
+                {
+                    string normalizedDrive = CompanionSyncService.NormalizeRemoteTargetPath(drive);
+                    rootOptions.Add(normalizedDrive);
+
+                    var driveNode = new TreeViewNode
+                    {
+                        Content = new AndroidFolderNode
+                        {
+                            DisplayName = normalizedDrive,
+                            FullPath = normalizedDrive,
+                            IsDirectory = true,
+                            IsDrive = true
+                        },
+                        HasUnrealizedChildren = true
+                    };
+                    StorageTreeView.RootNodes.Add(driveNode);
+                    driveNodes[normalizedDrive] = driveNode;
+                }
+
+                _isUpdatingRootSelector = true;
+                RootDriveComboBox.ItemsSource = rootOptions;
+
+                string currentSelected = SelectedPathBox.Text?.Trim() ?? "";
+                if (!hasAndroidStorage && (string.IsNullOrEmpty(currentSelected) || currentSelected.StartsWith("/")))
+                {
+                    currentSelected = winDrives.FirstOrDefault() ?? @"C:\";
+                    SelectedPathBox.Text = currentSelected;
+                }
+
+                if (CompanionSyncService.IsWindowsDrivePath(currentSelected))
+                {
+                    string driveRoot = char.ToUpperInvariant(currentSelected.TrimStart('/')[0]) + @":\";
+                    int idx = rootOptions.FindIndex(r => string.Equals(r, driveRoot, StringComparison.OrdinalIgnoreCase));
+                    RootDriveComboBox.SelectedIndex = idx >= 0 ? idx : 0;
+                    _isUpdatingRootSelector = false;
+
+                    if (driveNodes.TryGetValue(driveRoot, out var targetDriveNode))
+                    {
+                        await PopulateNodeChildrenAsync(targetDriveNode, forceRefresh);
+                        targetDriveNode.IsExpanded = true;
+                        _selectedTreeNode = targetDriveNode;
+                    }
+                }
+                else if (storageRootNode != null)
+                {
+                    RootDriveComboBox.SelectedIndex = 0;
+                    _isUpdatingRootSelector = false;
+
+                    await PopulateNodeChildrenAsync(storageRootNode, forceRefresh);
+                    storageRootNode.IsExpanded = true;
+
+                    var emulatedNode = storageRootNode.Children.FirstOrDefault(
+                        n => (n.Content as AndroidFolderNode)?.DisplayName == "emulated");
+                    if (emulatedNode != null)
+                    {
+                        await PopulateNodeChildrenAsync(emulatedNode, forceRefresh);
+                        emulatedNode.IsExpanded = true;
+
+                        var zeroNode = emulatedNode.Children.FirstOrDefault(
+                            n => (n.Content as AndroidFolderNode)?.DisplayName == "0");
+                        if (zeroNode != null)
+                        {
+                            await PopulateNodeChildrenAsync(zeroNode, forceRefresh);
+                            zeroNode.IsExpanded = true;
+                            _selectedTreeNode = zeroNode;
+                        }
+                    }
+                }
+                else
+                {
+                    RootDriveComboBox.SelectedIndex = rootOptions.Count > 0 ? 0 : -1;
+                    _isUpdatingRootSelector = false;
                 }
             }
             catch (Exception ex)
             {
+                _isUpdatingRootSelector = false;
                 ErrorStatusText.Text = ex.Message;
                 ErrorStatusText.Visibility = Visibility.Visible;
             }
@@ -143,11 +264,125 @@ namespace SyncDroidWinUI.Views
             }
         }
 
+        private async void RootDriveComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isUpdatingRootSelector) return;
+            if (RootDriveComboBox.SelectedItem is not string selectedRoot || string.IsNullOrWhiteSpace(selectedRoot))
+                return;
+
+            if (selectedRoot == "/storage")
+            {
+                SelectedPathBox.Text = "/storage/emulated/0";
+            }
+            else
+            {
+                SelectedPathBox.Text = selectedRoot;
+            }
+            SelectedIsDirectory = true;
+
+            var matchedNode = StorageTreeView.RootNodes.FirstOrDefault(
+                n => string.Equals((n.Content as AndroidFolderNode)?.FullPath, selectedRoot, StringComparison.OrdinalIgnoreCase));
+            if (matchedNode != null)
+            {
+                try
+                {
+                    LoadingRing.IsActive = true;
+                    if (matchedNode.HasUnrealizedChildren)
+                    {
+                        await PopulateNodeChildrenAsync(matchedNode, forceRefresh: false);
+                    }
+                    matchedNode.IsExpanded = true;
+                    _selectedTreeNode = matchedNode;
+                }
+                catch { }
+                finally
+                {
+                    LoadingRing.IsActive = false;
+                }
+            }
+        }
+
         private async Task PopulateNodeChildrenAsync(TreeViewNode parentNode, bool forceRefresh)
         {
             if (parentNode.Content is not AndroidFolderNode parentFolder || !parentFolder.IsDirectory) return;
 
             parentNode.Children.Clear();
+            bool isWinPath = CompanionSyncService.IsWindowsDrivePath(parentFolder.FullPath);
+
+            if (isWinPath && !(IsWirelessMode && _remoteHasWindowsDrives))
+            {
+                // Browse local Windows drive path directly
+                await Task.Run(() =>
+                {
+                    var childFolders = new List<AndroidFolderNode>();
+                    var childFiles = new List<AndroidFolderNode>();
+
+                    try
+                    {
+                        foreach (var dir in Directory.EnumerateDirectories(parentFolder.FullPath).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                var di = new DirectoryInfo(dir);
+                                if ((di.Attributes & FileAttributes.System) != 0) continue;
+                                childFolders.Add(new AndroidFolderNode
+                                {
+                                    DisplayName = di.Name,
+                                    FullPath = di.FullName,
+                                    IsDirectory = true
+                                });
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+
+                    if (_allowFileSelection)
+                    {
+                        try
+                        {
+                            foreach (var file in Directory.EnumerateFiles(parentFolder.FullPath).OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+                            {
+                                try
+                                {
+                                    var fi = new FileInfo(file);
+                                    childFiles.Add(new AndroidFolderNode
+                                    {
+                                        DisplayName = fi.Name,
+                                        FullPath = fi.FullName,
+                                        IsDirectory = false
+                                    });
+                                }
+                                catch { }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    DispatcherQueue?.TryEnqueue(() =>
+                    {
+                        foreach (var cf in childFolders)
+                        {
+                            parentNode.Children.Add(new TreeViewNode
+                            {
+                                Content = cf,
+                                HasUnrealizedChildren = true
+                            });
+                        }
+                        foreach (var fl in childFiles)
+                        {
+                            parentNode.Children.Add(new TreeViewNode
+                            {
+                                Content = fl,
+                                HasUnrealizedChildren = false
+                            });
+                        }
+                    });
+                });
+
+                parentNode.HasUnrealizedChildren = false;
+                return;
+            }
 
             if (_allowFileSelection &&
                 parentFolder.FullPath != "/storage" &&
@@ -168,7 +403,7 @@ namespace SyncDroidWinUI.Views
                 {
                     var fullPath = !string.IsNullOrWhiteSpace(entry.FullPath)
                         ? entry.FullPath
-                        : $"{parentFolder.FullPath.TrimEnd('/')}/{entry.Name}";
+                        : CompanionSyncService.CombineRemotePath(parentFolder.FullPath, entry.Name);
                     var childNode = new TreeViewNode
                     {
                         Content = new AndroidFolderNode
@@ -190,7 +425,7 @@ namespace SyncDroidWinUI.Views
 
                 foreach (var dirName in subDirs)
                 {
-                    var fullPath = $"{parentFolder.FullPath.TrimEnd('/')}/{dirName}";
+                    var fullPath = CompanionSyncService.CombineRemotePath(parentFolder.FullPath, dirName);
                     var childNode = new TreeViewNode
                     {
                         Content = new AndroidFolderNode
@@ -267,9 +502,21 @@ namespace SyncDroidWinUI.Views
                 LoadingRing.IsActive = true;
 
                 var parentPath = SelectedPath;
-                var createdPath = IsWirelessMode
-                    ? await CompanionSyncService.Instance.CreateRemoteDirectoryAsync(parentPath, folderName)
-                    : await AdbSyncService.Instance.CreateRemoteDirectoryAsync(parentPath, folderName);
+                string createdPath;
+
+                if (CompanionSyncService.IsWindowsDrivePath(parentPath) && !(IsWirelessMode && _remoteHasWindowsDrives))
+                {
+                    createdPath = Path.Combine(CompanionSyncService.NormalizeRemoteTargetPath(parentPath), folderName.Trim('\\', '/'));
+                    Directory.CreateDirectory(createdPath);
+                }
+                else if (IsWirelessMode)
+                {
+                    createdPath = await CompanionSyncService.Instance.CreateRemoteDirectoryAsync(parentPath, folderName);
+                }
+                else
+                {
+                    createdPath = await AdbSyncService.Instance.CreateRemoteDirectoryAsync(parentPath, folderName);
+                }
 
                 NewFolderNameBox.Text = "";
                 NewFolderBar.Visibility = Visibility.Collapsed;

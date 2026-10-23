@@ -6,9 +6,9 @@
     <RootNamespace>SyncDroidWinUI</RootNamespace>
     <AssemblyTitle>SyncDroid</AssemblyTitle>
     <Product>SyncDroid</Product>
-    <Version>0.1.4.0</Version>
-    <AssemblyVersion>0.1.4.0</AssemblyVersion>
-    <FileVersion>0.1.4.0</FileVersion>
+    <Version>0.1.5.0</Version>
+    <AssemblyVersion>0.1.5.0</AssemblyVersion>
+    <FileVersion>0.1.5.0</FileVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon Condition="Exists('Assets\AppIcon.ico')">Assets\AppIcon.ico</ApplicationIcon>
     <Platforms>x86;x64;ARM64</Platforms>

@@ -38,6 +38,7 @@ namespace SyncDroidWinUI.Services
         public bool IsServerRunning { get; private set; }
         public int CurrentListeningPort { get; private set; } = DefaultPort;
         public string? LastServerError { get; private set; }
+        public bool IsAccessForbiddenError { get; private set; }
 
         public event Action<string>? ServerActivityLogged;
 
@@ -137,6 +138,7 @@ namespace SyncDroidWinUI.Services
             {
                 IsServerRunning = false;
                 LastServerError = null;
+                IsAccessForbiddenError = false;
                 return;
             }
 
@@ -150,6 +152,7 @@ namespace SyncDroidWinUI.Services
                 _tcpListener.Start();
                 IsServerRunning = true;
                 LastServerError = null;
+                IsAccessForbiddenError = false;
 
                 _ = Task.Run(() => RunTcpAcceptLoopAsync(_tcpListener, ct), ct);
             }
@@ -157,6 +160,12 @@ namespace SyncDroidWinUI.Services
             {
                 IsServerRunning = false;
                 LastServerError = ex.Message;
+                IsAccessForbiddenError =
+                    (ex is SocketException sockEx && (sockEx.SocketErrorCode == SocketError.AccessDenied || sockEx.SocketErrorCode == SocketError.AddressAlreadyInUse)) ||
+                    ex.Message.Contains("forbidden", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("access", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("访问权限", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("存取權限", StringComparison.OrdinalIgnoreCase);
             }
 
             try
