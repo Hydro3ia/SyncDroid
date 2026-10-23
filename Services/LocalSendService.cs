@@ -58,6 +58,9 @@ namespace SyncDroidWinUI.Services
         }
 
         public event Action<string>? ServerActivityLogged;
+        public event Action<IncomingTransferSessionEventArgs>? IncomingTransferRequested;
+        public event Action<string, string, double, string>? IncomingFileProgressUpdated;
+        public event Action<string, string, string, bool, bool>? IncomingFileCompleted;
 
         private readonly HttpClient _httpClient;
         private readonly HttpClient _probeHttpClient;
@@ -525,11 +528,80 @@ namespace SyncDroidWinUI.Services
                     StorePeerFromInfo(prepReq.Info, remoteIp);
                 }
 
+                string senderAlias = string.IsNullOrWhiteSpace(prepReq.Info?.Alias) ? remoteIp : prepReq.Info!.Alias;
+                string senderFp = prepReq.Info?.Fingerprint ?? "";
+                int senderPort = (prepReq.Info?.Port > 0) ? prepReq.Info.Port : DefaultPort;
+                bool isTrusted = SettingsService.IsDeviceTrusted("LocalSend", senderFp, remoteIp, senderAlias);
+                string receiveRoot = SettingsService.Load().LocalSendReceiveDirectory;
+                var loc = LocalizationService.Instance;
+
                 string sessionId = Guid.NewGuid().ToString("N");
+                var receivedItems = new List<ReceivedFileItem>();
+                foreach (var kvp in prepReq.Files)
+                {
+                    string sanitizedRel = CompanionSyncService.SanitizeRelativePathForWindows(kvp.Value.FileName);
+                    string targetPath = Path.Combine(receiveRoot, sanitizedRel.Replace('/', '\\'));
+                    receivedItems.Add(new ReceivedFileItem
+                    {
+                        Id = kvp.Key,
+                        FileName = kvp.Value.FileName,
+                        SenderName = senderAlias,
+                        Protocol = "LocalSend",
+                        Size = kvp.Value.Size,
+                        SizeDisplay = FileHashHelper.FormatByteSize(kvp.Value.Size),
+                        SavedPath = targetPath,
+                        StatusText = isTrusted ? loc.ReceiveStatusWaitingUpload : loc.ReceiveStatusPending,
+                        ProgressPercent = 0
+                    });
+                }
+
+                var tcs = !isTrusted ? new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously) : null;
+                var sessionArgs = new IncomingTransferSessionEventArgs
+                {
+                    SessionId = sessionId,
+                    SenderName = senderAlias,
+                    SenderIp = remoteIp,
+                    Protocol = "LocalSend",
+                    SaveDirectory = receiveRoot,
+                    RequiresConfirmation = !isTrusted,
+                    Files = receivedItems,
+                    ConfirmationTcs = tcs
+                };
+
+                IncomingTransferRequested?.Invoke(sessionArgs);
+
+                if (!isTrusted && tcs != null)
+                {
+                    LogServerActivity($"Incoming transfer request from '{senderAlias}' ({prepReq.Files.Count} file(s)) — waiting for user confirmation...");
+                    bool accepted = false;
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeoutCts.CancelAfter(TimeSpan.FromMinutes(3));
+                    try
+                    {
+                        using (timeoutCts.Token.Register(() => tcs.TrySetResult(false)))
+                        {
+                            accepted = await tcs.Task;
+                        }
+                    }
+                    catch
+                    {
+                        accepted = false;
+                    }
+
+                    if (!accepted)
+                    {
+                        LogServerActivity($"Declined incoming transfer request from '{senderAlias}'.");
+                        await WriteJsonResponseAsync(stream, 403, "Forbidden", new { error = "Declined by user" }, ct);
+                        return;
+                    }
+
+                    SettingsService.AddTrustedDevice("LocalSend", senderAlias, $"{remoteIp}:{senderPort}", senderFp);
+                }
+
                 var session = new ReceiveSession
                 {
                     SessionId = sessionId,
-                    SenderAlias = prepReq.Info?.Alias ?? remoteIp,
+                    SenderAlias = senderAlias,
                     Files = prepReq.Files
                 };
 
@@ -585,6 +657,7 @@ namespace SyncDroidWinUI.Services
                     {
                         await DrainBodyStreamAsync(bodyStream, contentLength, isChunked, ct);
                         LogServerActivity($"Skipped (Identical): {sanitizedRel}");
+                        IncomingFileCompleted?.Invoke(sessionId, fileId, finalTarget, true, false);
                         await WriteJsonResponseAsync(stream, 200, "OK", new { ok = true, skipped = true }, ct);
                         return;
                     }
@@ -597,12 +670,14 @@ namespace SyncDroidWinUI.Services
                 string tempPart = Path.Combine(parentDir, $".syncdroid_{Guid.NewGuid():N}.part");
                 try
                 {
+                    IncomingFileProgressUpdated?.Invoke(sessionId, fileId, 0, "");
                     long bytesReceived = 0;
                     double elapsedSec = 0;
                     using (var rawFs = new FileStream(tempPart, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
                     using (var trackedFs = new ProgressTrackingStream(rawFs, (inFlightBytes, liveSpeed) =>
                     {
                         double livePct = FileHashHelper.CalculateOverallPercent(inFlightBytes, fileDto.Size, 0, 1);
+                        IncomingFileProgressUpdated?.Invoke(sessionId, fileId, livePct, liveSpeed);
                         LogServerActivity($"Receiving: {sanitizedRel} | Speed: {liveSpeed} | Overall: {livePct:F1}%");
                     }))
                     {
@@ -646,11 +721,13 @@ namespace SyncDroidWinUI.Services
                     }
 
                     string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesReceived, elapsedSec);
+                    IncomingFileCompleted?.Invoke(sessionId, fileId, finalTarget, false, false);
                     LogServerActivity($"Received file from '{session.SenderAlias}': {finalTarget} ({FileHashHelper.FormatByteSize(bytesReceived)}) | Speed: {avgSpeed} | Overall: 100%");
                     await WriteJsonResponseAsync(stream, 200, "OK", new { ok = true }, ct);
                 }
                 catch
                 {
+                    IncomingFileCompleted?.Invoke(sessionId, fileId, finalTarget, false, true);
                     try { if (File.Exists(tempPart)) File.Delete(tempPart); } catch { }
                     throw;
                 }
