@@ -129,16 +129,6 @@ namespace SyncDroidWinUI.Views
                     }
                 }
 
-                bool hasAdb = adb.CurrentDevice != null && adb.CurrentDevice.State == SharpAdbClient.DeviceState.Online;
-                if (!hasWireless && !hasAdb)
-                {
-                    if (ViewModel != null)
-                    {
-                        ViewModel.StatusText = LocalizationService.Instance.NoDeviceConnectedError;
-                    }
-                    return;
-                }
-
                 var dialog = new AndroidFolderPickerDialog(AndroidPathComboBox.Text)
                 {
                     XamlRoot = this.XamlRoot
@@ -160,7 +150,7 @@ namespace SyncDroidWinUI.Views
             {
                 if (ViewModel != null)
                 {
-                    ViewModel.StatusText = "Error browsing Android folder: " + ex.Message;
+                    ViewModel.StatusText = "Error browsing target folder: " + ex.Message;
                 }
             }
         }

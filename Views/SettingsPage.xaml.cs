@@ -115,6 +115,11 @@ namespace SyncDroidWinUI.Views
                 LocalSendStatusText.Text = $"✔ Active on UDP/TCP {ls.CurrentListeningPort}";
                 LocalSendStatusText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.MediumSeaGreen);
             }
+            else if (ls.IsAccessForbiddenError)
+            {
+                LocalSendStatusText.Text = $"✖ {Loc.LocalSendAccessForbiddenPrompt}";
+                LocalSendStatusText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+            }
             else if (!string.IsNullOrEmpty(ls.LastServerError))
             {
                 LocalSendStatusText.Text = $"✖ {ls.LastServerError}";
@@ -183,7 +188,7 @@ namespace SyncDroidWinUI.Views
             CompanionStatusText.Foreground = new SolidColorBrush(Microsoft.UI.Colors.MediumSeaGreen);
         }
 
-        private void LocalSendServerToggle_Toggled(object sender, RoutedEventArgs e)
+        private async void LocalSendServerToggle_Toggled(object sender, RoutedEventArgs e)
         {
             if (_isInitializing) return;
 
@@ -193,6 +198,23 @@ namespace SyncDroidWinUI.Views
 
             LocalSendService.Instance.StartOrRestartServerFromSettings();
             UpdateLocalSendServerPreview();
+
+            if (LocalSendServerToggle.IsOn && LocalSendService.Instance.IsAccessForbiddenError && this.XamlRoot != null)
+            {
+                try
+                {
+                    var dialog = new ContentDialog
+                    {
+                        XamlRoot = this.XamlRoot,
+                        Title = Loc.LocalSendAccessForbiddenDialogTitle,
+                        Content = Loc.LocalSendAccessForbiddenDialogMessage,
+                        CloseButtonText = Loc.AdbUnauthorizedDialogOkButton,
+                        DefaultButton = ContentDialogButton.Close
+                    };
+                    await dialog.ShowAsync();
+                }
+                catch { }
+            }
         }
 
         private void LocalSendReceiveDirTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -268,6 +290,7 @@ namespace SyncDroidWinUI.Views
             if (LanguageComboBox.SelectedItem is ComboBoxItem item && item.Tag is string langCode)
             {
                 LocalizationService.Instance.CurrentLanguage = langCode;
+                UpdateLocalSendServerPreview();
             }
         }
 

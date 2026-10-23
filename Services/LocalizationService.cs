@@ -69,13 +69,13 @@ namespace SyncDroidWinUI.Services
         public string ConnectButton => T("Connect", "连接", "連接");
 
         // Tabs
-        public string TabPcToAndroid => T("PC  ➔  Android (Push Sync)", "电脑  ➔  Android (推送同步)", "電腦  ➔  Android (推送同步)");
-        public string TabAndroidToPc => T("Android  ➔  PC (Pull Sync)", "Android  ➔  电脑 (拉取同步)", "Android  ➔  電腦 (拉取同步)");
+        public string TabPcToAndroid => "Push (/MIR mode)";
+        public string TabAndroidToPc => "Pull (/MIR mode)";
         public string TabDirectTransfer => T("Direct Transfer (Files / Folders)", "文件直传 (单文件 / 文件夹)", "檔案直傳 (單檔案 / 資料夾)");
 
         // SyncPage & Sync Modes
         public string PcDirectoryLabel => T("Windows PC Directory", "Windows 电脑文件夹路径", "Windows 電腦資料夾路徑");
-        public string AndroidDirectoryLabel => T("Android Device Directory", "Android 设备文件夹路径", "Android 裝置資料夾路徑");
+        public string AndroidDirectoryLabel => T("Target Device Directory", "目标设备文件夹路径", "目標裝置資料夾路徑");
         public string SourceBadge => T("SOURCE", "源目录 (SOURCE)", "來源目錄 (SOURCE)");
         public string TargetBadge => T("TARGET", "目标目录 (TARGET)", "目標目錄 (TARGET)");
         public string MirrorSyncBanner => T("MIRROR SYNC (/MIR)", "镜像同步模式 (/MIR)", "鏡像同步模式 (/MIR)");
@@ -84,7 +84,7 @@ namespace SyncDroidWinUI.Services
         public string MirrorModeOption => T("Mirror Sync (/MIR - Delete extra files on target)", "镜像同步 (/MIR - 清理目标端多余文件)", "鏡像同步 (/MIR - 清理目標端多餘檔案)");
         public string IncrementalModeOption => T("Incremental Merge (Keep existing files on target)", "增量合并 (保留目标端已有文件)", "增量合併 (保留目標端已有檔案)");
         public string PcPathPlaceholder => T("Select or type a PC folder path (e.g. D:\\MyFolder)", "选择或输入电脑文件夹路径 (例如 D:\\MyFolder)", "選擇或輸入電腦資料夾路徑 (例如 D:\\MyFolder)");
-        public string AndroidPathPlaceholder => T("Select or type an Android folder path (e.g. /sdcard/Pictures/MyFolder)", "选择或输入 Android 文件夹路径 (例如 /sdcard/Pictures/MyFolder)", "選擇或輸入 Android 資料夾路徑 (例如 /sdcard/Pictures/MyFolder)");
+        public string AndroidPathPlaceholder => T("Select or type a target path (e.g. /storage/emulated/0/MyFolder or D:\\MyFolder)", "选择或输入目标设备路径 (例如 /storage/emulated/0/MyFolder 或 D:\\MyFolder)", "選擇或輸入目標裝置路徑 (例如 /storage/emulated/0/MyFolder 或 D:\\MyFolder)");
         public string BrowseButton => T("Browse...", "浏览...", "瀏覽...");
         public string StartSyncButton => T("Start Sync (MIR Mode)", "开始同步 (MIR 镜像)", "開始同步 (MIR 鏡像)");
         public string StartIncrementalSyncButton => T("Start Sync (Merge Mode)", "开始同步 (增量合并)", "開始同步 (增量合併)");
@@ -175,6 +175,15 @@ namespace SyncDroidWinUI.Services
             "支援在「檔案直傳」中自動發現區域網路內的 LocalSend 裝置並雙向互傳檔案");
         public string LocalSendEnableServerLabel => T("Enable LocalSend Discovery & Receiver (Port 53317)", "开启 LocalSend 局域网发现与文件接收服务 (端口 53317)", "開啟 LocalSend 區域網路發現與檔案接收服務 (連接埠 53317)");
         public string LocalSendReceiveDirLabel => T("LocalSend Receive Folder on PC:", "本机 LocalSend 接收保存目录：", "本機 LocalSend 接收儲存目錄：");
+        public string LocalSendAccessForbiddenPrompt => T(
+            "Access is forbidden (Port 53317 in use): Please close the existing LocalSend software to use this feature",
+            "端口访问被拒绝 (Access is forbidden)：请关闭已存在的 LocalSend 软件以使用此功能",
+            "連接埠存取被拒絕 (Access is forbidden)：請關閉已存在的 LocalSend 軟體以使用此功能");
+        public string LocalSendAccessForbiddenDialogTitle => T("LocalSend Port Conflict", "LocalSend 端口冲突提示", "LocalSend 連接埠衝突提示");
+        public string LocalSendAccessForbiddenDialogMessage => T(
+            "Failed to start LocalSend service on port 53317 (Access is forbidden).\n\nPlease close the existing LocalSend application running on your PC to use this feature.",
+            "启动 LocalSend 协议服务失败（Access is forbidden）。\n\n请先关闭并退出已存在的 LocalSend 软件以使用此功能。",
+            "啟動 LocalSend 協議服務失敗（Access is forbidden）。\n\n請先關閉並退出已存在的 LocalSend 軟體以使用此功能。");
 
         // Settings Page: ADB Card
         public string AdbSectionTitle => T("ADB Configuration", "ADB 路径配置", "ADB 路徑設定");
@@ -205,7 +214,7 @@ namespace SyncDroidWinUI.Services
 
         // About This App Card
         public string AboutSectionTitle => T("About This App", "关于此应用", "關於此應用程式");
-        public string AboutAppVersion => "Version 0.1.4.0 Release";
+        public string AboutAppVersion => "Version 0.1.5.0 Release";
         public string AboutAppDescription => T(
             "SyncDroid is a lightweight, CJK-safe folder synchronization (/MIR & Incremental Merge) and direct file transfer tool supporting USB ADB, Wireless Companion, and LocalSend.",
             "SyncDroid 是一款轻量级、完美支持中文路径的双向文件夹同步（/MIR 镜像与增量合并）及文件直传工具，支持 USB ADB、无线伴侣与 LocalSend 协议。",
@@ -218,7 +227,7 @@ namespace SyncDroidWinUI.Services
         public string AboutPrivacyLinkText => T("Privacy Policy", "隐私政策 (Privacy Policy)", "隱私權政策 (Privacy Policy)");
 
         // Android Folder Picker Dialog
-        public string AndroidPickerTitle => T("Browse Device Storage (/storage)", "浏览设备存储目录 (/storage)", "瀏覽裝置儲存目錄 (/storage)");
+        public string AndroidPickerTitle => T("Browse Target Storage (/storage & Windows Drives)", "浏览目标存储目录 (/storage 与 Windows 盘符)", "瀏覽目標儲存目錄 (/storage 與 Windows 磁碟機)");
         public string RefreshTreeButton => T("Refresh", "刷新", "重新整理");
         public string NewFolderButton => T("New Folder", "新建文件夹", "新增資料夾");
         public string NewFolderPlaceholder => T("Enter new folder name...", "输入新文件夹名称...", "輸入新資料夾名稱...");

@@ -51,7 +51,7 @@ namespace SyncDroidWinUI.Models
     {
         public string DeviceName { get; set; } = "";
         public string Platform { get; set; } = "Windows";
-        public string Version { get; set; } = "0.1.4.0";
+        public string Version { get; set; } = "0.1.5.0";
         public int ListeningPort { get; set; } = 45821;
         public long FreeSpaceBytes { get; set; }
         public string DefaultStorageRoot { get; set; } = @"C:\";

@@ -265,6 +265,17 @@ public partial class SyncViewModel : ObservableObject
                     await companion.SyncAndroidToPcAsync(currentAndroidPath, currentPcPath, IsMirrorMode, progressCallback, logCallback, token);
                 }
             }
+            else if (CompanionSyncService.IsWindowsDrivePath(currentAndroidPath))
+            {
+                if (_isPcToAndroid)
+                {
+                    await companion.SyncWindowsPathAsync(currentPcPath, currentAndroidPath, IsMirrorMode, progressCallback, logCallback, token);
+                }
+                else
+                {
+                    await companion.SyncWindowsPathAsync(currentAndroidPath, currentPcPath, IsMirrorMode, progressCallback, logCallback, token);
+                }
+            }
             else
             {
                 if (_isPcToAndroid)
