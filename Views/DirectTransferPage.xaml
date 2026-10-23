@@ -1,0 +1,365 @@
+<Page
+    x:Class="SyncDroidWinUI.Views.DirectTransferPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:SyncDroidWinUI.Views"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="Transparent">
+
+    <Grid Padding="12,10,12,14" RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="1.25*" MinHeight="220"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="1*" MinHeight="140"/>
+        </Grid.RowDefinitions>
+
+        <!-- Card 1: Transfer Queue + Target Device Path + Conflict Policy -->
+        <Border
+            Grid.Row="0"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="18,12"
+            AllowDrop="True"
+            DragOver="QueueCard_DragOver"
+            Drop="QueueCard_Drop">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Row 0: Queue Toolbar -->
+                <Grid Grid.Row="0" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE898;" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.DirectTransferQueueTitle, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                            <TextBlock x:Name="QueueCountText" Text="0" FontFamily="Consolas" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                        <Button Click="AddFiles_Click" Padding="10,5">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE8A5;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.AddFilesButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Click="AddFolder_Click" Padding="10,5">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE8B7;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.AddFolderButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Click="ClearQueue_Click" Padding="10,5">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.ClearQueueButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!-- Row 1: Queue ListView / Empty Drop Zone -->
+                <Border
+                    Grid.Row="1"
+                    Background="{ThemeResource LayerFillColorAltBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="4">
+                    <Grid>
+                        <StackPanel
+                            x:Name="EmptyQueueHintPanel"
+                            Spacing="6"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsHitTestVisible="False">
+                            <FontIcon Glyph="&#xE896;" FontSize="24" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center"/>
+                            <TextBlock
+                                Text="{Binding Loc.DirectTransferEmptyHint, Mode=OneWay}"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                HorizontalAlignment="Center"
+                                TextAlignment="Center"
+                                TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <ListView
+                            x:Name="QueueListView"
+                            ItemsSource="{Binding QueueItems, Mode=OneWay}"
+                            SelectionMode="None">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="MinHeight" Value="30"/>
+                                    <Setter Property="Padding" Value="8,3"/>
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <FontIcon Grid.Column="0" Glyph="{Binding IconGlyph}" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+
+                                        <Border Grid.Column="1" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding TypeBadge}" FontFamily="Consolas" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        </Border>
+
+                                        <TextBlock Grid.Column="2" Text="{Binding LocalPath}" FontFamily="Consolas" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+
+                                        <TextBlock Grid.Column="3" Text="{Binding SizeDisplay}" FontFamily="Consolas" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+
+                                        <Button Grid.Column="4" Tag="{Binding LocalPath}" Click="RemoveQueueItem_Click" Padding="6,3" Background="Transparent" BorderThickness="0">
+                                            <FontIcon Glyph="&#xE711;" FontSize="11"/>
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+
+                <!-- Row 2: Target Device Receive Directory -->
+                <Grid Grid.Row="2" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE8EA;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.TargetDeviceReceiveDirLabel, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <ComboBox
+                        x:Name="TargetAndroidComboBox"
+                        Grid.Column="1"
+                        IsEditable="True"
+                        HorizontalAlignment="Stretch"
+                        PlaceholderText="/storage/emulated/0/Download/SyncDroid"
+                        ItemsSource="{Binding AndroidPathHistory}"
+                        Text="{Binding TargetAndroidPath, Mode=TwoWay}"/>
+
+                    <Button
+                        x:Name="BrowseTargetDirButton"
+                        Grid.Column="2"
+                        Click="BrowseTargetAndroid_Click"
+                        Padding="12,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE8B7;" FontSize="13"/>
+                            <TextBlock Text="{Binding Loc.BrowseButton, Mode=OneWay}" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!-- Row 3: Conflict Resolution Policy -->
+                <Border
+                    Grid.Row="3"
+                    Background="{ThemeResource LayerFillColorAltBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="12,5">
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE81E;" FontSize="13" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Loc.ConflictPolicyLabel, Mode=OneWay}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <RadioButton
+                            x:Name="ConflictSkipRadio"
+                            Grid.Column="1"
+                            GroupName="DirectConflictGroup"
+                            Content="{Binding Loc.ConflictSkipIdentical, Mode=OneWay}"
+                            FontSize="12"
+                            MinWidth="0"
+                            Padding="6,0,0,0"
+                            Checked="ConflictRadio_Checked"/>
+
+                        <RadioButton
+                            x:Name="ConflictOverwriteRadio"
+                            Grid.Column="2"
+                            GroupName="DirectConflictGroup"
+                            Content="{Binding Loc.ConflictOverwrite, Mode=OneWay}"
+                            FontSize="12"
+                            MinWidth="0"
+                            Padding="6,0,0,0"
+                            Checked="ConflictRadio_Checked"/>
+
+                        <RadioButton
+                            x:Name="ConflictKeepBothRadio"
+                            Grid.Column="3"
+                            GroupName="DirectConflictGroup"
+                            Content="{Binding Loc.ConflictKeepBoth, Mode=OneWay}"
+                            FontSize="12"
+                            MinWidth="0"
+                            Padding="6,0,0,0"
+                            Checked="ConflictRadio_Checked"/>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Card 2: Direct Transfer Controls & Progress -->
+        <Border
+            Grid.Row="1"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="18,12">
+            <StackPanel Spacing="10">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                        <Button
+                            Style="{StaticResource AccentButtonStyle}"
+                            Click="StartDirectPush_Click"
+                            Padding="16,7">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE898;" FontSize="14"/>
+                                <TextBlock Text="{Binding Loc.StartDirectPushButton, Mode=OneWay}" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Click="PullFromAndroid_Click" Padding="14,7">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE896;" FontSize="13"/>
+                                <TextBlock Text="{Binding Loc.PullFromDeviceButton, Mode=OneWay}"/>
+                            </StackPanel>
+                        </Button>
+
+                        <Button Click="CancelTransfer_Click" Padding="12,7">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.CancelButton, Mode=OneWay}"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <TextBlock
+                            x:Name="TransferStatusText"
+                            Text="{Binding Loc.StatusReady, Mode=OneWay}"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <Border
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            CornerRadius="4"
+                            Padding="8,3"
+                            VerticalAlignment="Center">
+                            <TextBlock
+                                x:Name="TransferProgressText"
+                                Text="0%"
+                                FontFamily="Consolas"
+                                FontSize="12"
+                                FontWeight="SemiBold"/>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+
+                <ProgressBar x:Name="TransferProgressBar" Value="0" Maximum="100" MinHeight="6"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Card 3: Activity Logs -->
+        <Border
+            Grid.Row="2"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="16,10">
+            <Grid RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.ActivityLogsHeader, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button Click="ClearLogs_Click" Padding="10,4">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.ClearLogsButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Click="CopyLogs_Click" Padding="10,4">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE8C8;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.CopyLogsButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <Border
+                    Grid.Row="1"
+                    Background="{ThemeResource LayerFillColorAltBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="4">
+                    <ListView
+                        x:Name="TransferLogListView"
+                        ItemsSource="{Binding Logs, Mode=OneWay}"
+                        SelectionMode="None">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="MinHeight" Value="24"/>
+                                <Setter Property="Padding" Value="8,2"/>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="12" IsTextSelectionEnabled="True"/>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

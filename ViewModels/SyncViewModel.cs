@@ -2,9 +2,11 @@ namespace SyncDroidWinUI.ViewModels;
 
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SyncDroidWinUI.Models;
+using SyncDroidWinUI.Services;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,7 +16,7 @@ public partial class SyncViewModel : ObservableObject
     private static readonly ObservableCollection<string> _sharedAndroidPathHistory = new();
     private static bool _isHistoryInitialized;
 
-    public Services.LocalizationService Loc => Services.LocalizationService.Instance;
+    public LocalizationService Loc => LocalizationService.Instance;
 
     public ObservableCollection<string> PcPathHistory => _sharedPcPathHistory;
     public ObservableCollection<string> AndroidPathHistory => _sharedAndroidPathHistory;
@@ -24,6 +26,39 @@ public partial class SyncViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string AndroidPath { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsMirrorMode { get; set; } = true;
+
+    public bool IsIncrementalMode
+    {
+        get => !IsMirrorMode;
+        set
+        {
+            if (IsMirrorMode == value)
+            {
+                IsMirrorMode = !value;
+            }
+        }
+    }
+
+    public string CurrentSyncModeBanner => IsMirrorMode ? Loc.MirrorSyncBanner : Loc.IncrementalSyncBanner;
+    public string CurrentStartSyncButtonText => IsMirrorMode ? Loc.StartSyncButton : Loc.StartIncrementalSyncButton;
+
+    partial void OnIsMirrorModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsIncrementalMode));
+        OnPropertyChanged(nameof(CurrentSyncModeBanner));
+        OnPropertyChanged(nameof(CurrentStartSyncButtonText));
+
+        var settings = SettingsService.Load();
+        settings.IsMirModeDefault = value;
+        if (_isPcToAndroid)
+            settings.PcToAndroid_IsMirMode = value;
+        else
+            settings.AndroidToPc_IsMirMode = value;
+        SettingsService.Save(settings);
+    }
 
     [ObservableProperty]
     public partial int Progress { get; set; } = 0;
@@ -40,7 +75,11 @@ public partial class SyncViewModel : ObservableObject
 
     public ObservableCollection<string> Logs { get; } = new();
 
+    public bool SkipOverlongFiles { get; set; }
+    public HashSet<string> AcknowledgedOverlongFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly bool _isPcToAndroid;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private CancellationTokenSource? _syncCts;
 
     public bool IsPcToAndroid => _isPcToAndroid;
@@ -49,16 +88,30 @@ public partial class SyncViewModel : ObservableObject
     public SyncViewModel(bool isPcToAndroid)
     {
         _isPcToAndroid = isPcToAndroid;
+        _dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         StatusText = Loc.StatusReady;
+
         Loc.LanguageChanged += (_, _) =>
         {
+            OnPropertyChanged(nameof(CurrentSyncModeBanner));
+            OnPropertyChanged(nameof(CurrentStartSyncButtonText));
             if (_syncCts == null && (StatusText == "Ready" || StatusText == "就绪" || StatusText == "就緒"))
             {
                 StatusText = Loc.StatusReady;
             }
         };
 
-        var settings = Services.SettingsService.Load();
+        CompanionSyncService.Instance.ServerActivityLogged += msg =>
+        {
+            _dispatcherQueue?.TryEnqueue(() => AddLog(msg));
+        };
+
+        LocalSendService.Instance.ServerActivityLogged += msg =>
+        {
+            _dispatcherQueue?.TryEnqueue(() => AddLog(msg));
+        };
+
+        var settings = SettingsService.Load();
 
         if (!_isHistoryInitialized)
         {
@@ -73,11 +126,13 @@ public partial class SyncViewModel : ObservableObject
         {
             PcPath = settings.PcToAndroid_PcPath;
             AndroidPath = settings.PcToAndroid_AndroidPath;
+            IsMirrorMode = settings.PcToAndroid_IsMirMode;
         }
         else
         {
             PcPath = settings.AndroidToPc_PcPath;
             AndroidPath = settings.AndroidToPc_AndroidPath;
+            IsMirrorMode = settings.AndroidToPc_IsMirMode;
         }
     }
 
@@ -87,14 +142,14 @@ public partial class SyncViewModel : ObservableObject
         var trimmed = path.Trim();
         UpdateObservableHistory(_sharedPcPathHistory, trimmed, ignoreCase: true);
 
-        var settings = Services.SettingsService.Load();
+        var settings = SettingsService.Load();
         if (_isPcToAndroid)
             settings.PcToAndroid_PcPath = trimmed;
         else
             settings.AndroidToPc_PcPath = trimmed;
 
-        Services.SettingsService.AddToHistoryList(settings.PcPathHistory, trimmed, ignoreCase: true);
-        Services.SettingsService.Save(settings);
+        SettingsService.AddToHistoryList(settings.PcPathHistory, trimmed, ignoreCase: true);
+        SettingsService.Save(settings);
     }
 
     public void AddAndroidPathToHistory(string? path)
@@ -103,14 +158,14 @@ public partial class SyncViewModel : ObservableObject
         var trimmed = path.Trim();
         UpdateObservableHistory(_sharedAndroidPathHistory, trimmed, ignoreCase: false);
 
-        var settings = Services.SettingsService.Load();
+        var settings = SettingsService.Load();
         if (_isPcToAndroid)
             settings.PcToAndroid_AndroidPath = trimmed;
         else
             settings.AndroidToPc_AndroidPath = trimmed;
 
-        Services.SettingsService.AddToHistoryList(settings.AndroidPathHistory, trimmed, ignoreCase: false);
-        Services.SettingsService.Save(settings);
+        SettingsService.AddToHistoryList(settings.AndroidPathHistory, trimmed, ignoreCase: false);
+        SettingsService.Save(settings);
     }
 
     private static void UpdateObservableHistory(ObservableCollection<string> collection, string path, bool ignoreCase)
@@ -141,11 +196,10 @@ public partial class SyncViewModel : ObservableObject
     {
         if (_syncCts != null)
         {
-            Log("Sync is already running or cancelling...");
+            AddLog("Sync is already running or cancelling...");
             return;
         }
 
-        Logs.Clear();
         Progress = 0;
         StatusText = Loc.StatusSyncing;
 
@@ -154,7 +208,7 @@ public partial class SyncViewModel : ObservableObject
 
         if (string.IsNullOrWhiteSpace(currentPcPath) || string.IsNullOrWhiteSpace(currentAndroidPath))
         {
-            Log("Error: Paths cannot be empty.");
+            AddLog("Error: Paths cannot be empty.");
             StatusText = Loc.StatusInvalidPaths;
             return;
         }
@@ -167,46 +221,73 @@ public partial class SyncViewModel : ObservableObject
 
         try
         {
-            // Save settings and update shared history
             AddPcPathToHistory(currentPcPath);
             AddAndroidPathToHistory(currentAndroidPath);
 
-            var syncService = Services.AdbSyncService.Instance;
-
-            Action<int> progressCallback = p =>
-            {
-                Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread()?.TryEnqueue(() => Progress = p);
-            };
-
-            var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+            var dispatcher = _dispatcherQueue ?? Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
             Action<string> logCallback = msg =>
             {
-                dispatcher?.TryEnqueue(() => Log(msg));
+                dispatcher?.TryEnqueue(() => AddLog(msg));
             };
-            progressCallback = p =>
+            Action<int> progressCallback = p =>
             {
                 dispatcher?.TryEnqueue(() => Progress = p);
             };
 
-            if (_isPcToAndroid)
+            var companion = CompanionSyncService.Instance;
+            var adb = AdbSyncService.Instance;
+
+            if (companion.ActiveConnectionMode == ConnectionMode.LocalSend && LocalSendService.Instance.CurrentPeer != null)
             {
-                await syncService.SyncPcToAndroidAsync(currentPcPath, currentAndroidPath, progressCallback, logCallback, token);
+                AddLog(Loc.LocalSendSyncTabNotSupported);
+                StatusText = Loc.StatusFailed;
+                return;
+            }
+
+            bool useWireless = companion.ActiveConnectionMode == ConnectionMode.WirelessCompanion && companion.CurrentPeer != null;
+            if (!useWireless && (adb.CurrentDevice == null || adb.CurrentDevice.State != SharpAdbClient.DeviceState.Online))
+            {
+                try { adb.StartServerAndConnect(); } catch { }
+                if (adb.CurrentDevice == null && companion.CurrentPeer != null)
+                {
+                    useWireless = true;
+                }
+            }
+
+            if (useWireless)
+            {
+                if (_isPcToAndroid)
+                {
+                    await companion.SyncPcToAndroidAsync(currentPcPath, currentAndroidPath, IsMirrorMode, SkipOverlongFiles, progressCallback, logCallback, token);
+                }
+                else
+                {
+                    await companion.SyncAndroidToPcAsync(currentAndroidPath, currentPcPath, IsMirrorMode, progressCallback, logCallback, token);
+                }
             }
             else
             {
-                await syncService.SyncAndroidToPcAsync(currentAndroidPath, currentPcPath, progressCallback, logCallback, token);
+                if (_isPcToAndroid)
+                {
+                    await adb.SyncPcToAndroidAsync(currentPcPath, currentAndroidPath, progressCallback, logCallback, token, IsMirrorMode, SkipOverlongFiles);
+                }
+                else
+                {
+                    await adb.SyncAndroidToPcAsync(currentAndroidPath, currentPcPath, progressCallback, logCallback, token, IsMirrorMode);
+                }
             }
+
             StatusText = Loc.StatusCompleted;
             Progress = 100;
         }
         catch (OperationCanceledException)
         {
-            Log("Sync was cancelled.");
+            AddLog("Sync was cancelled.");
             StatusText = Loc.StatusCancelled;
         }
         catch (Exception ex)
         {
-            Log($"Error: {ex.Message}");
+            AddLog($"Error: {ex.Message}");
             StatusText = Loc.StatusFailed;
         }
         finally
@@ -223,7 +304,7 @@ public partial class SyncViewModel : ObservableObject
         var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
         dataPackage.SetText(allLogs);
         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
-        Log("Logs copied to clipboard.");
+        AddLog("Logs copied to clipboard.");
     }
 
     [RelayCommand]
@@ -238,7 +319,7 @@ public partial class SyncViewModel : ObservableObject
         _syncCts?.Cancel();
     }
 
-    private void Log(string message)
+    public void AddLog(string message)
     {
         Logs.Add($"[{DateTime.Now:HH:mm:ss}] {message}");
 

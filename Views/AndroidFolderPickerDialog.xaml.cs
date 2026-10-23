@@ -1,7 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using SyncDroidWinUI.Models;
 using SyncDroidWinUI.Services;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -11,6 +13,9 @@ namespace SyncDroidWinUI.Views
     {
         public string DisplayName { get; set; } = "";
         public string FullPath { get; set; } = "";
+        public bool IsDirectory { get; set; } = true;
+        public string IconGlyph => IsDirectory ? "\uE8B7" : "\uE8A5";
+        public string IconColor => IsDirectory ? "#E8A838" : "#6495ED";
 
         public override string ToString() => DisplayName;
     }
@@ -19,19 +24,44 @@ namespace SyncDroidWinUI.Views
     {
         public LocalizationService Loc => LocalizationService.Instance;
 
+        private readonly bool _allowFileSelection;
+
+        public string DialogTitle => _allowFileSelection ? Loc.AndroidPullPickerTitle : Loc.AndroidPickerTitle;
+        public string PrimaryActionText => _allowFileSelection ? Loc.SelectItemPrimaryButton : Loc.SelectFolderPrimaryButton;
+
         public string SelectedPath => string.IsNullOrWhiteSpace(SelectedPathBox.Text)
             ? "/storage/emulated/0"
             : SelectedPathBox.Text.Trim();
 
+        public bool SelectedIsDirectory { get; private set; } = true;
+
         private TreeViewNode? _selectedTreeNode;
 
-        public AndroidFolderPickerDialog(string? initialPath = null)
+        private bool IsWirelessMode =>
+            CompanionSyncService.Instance.ActiveConnectionMode == ConnectionMode.WirelessCompanion &&
+            CompanionSyncService.Instance.CurrentPeer != null;
+
+        public AndroidFolderPickerDialog(string? initialPath = null, bool allowFileSelection = false)
         {
+            _allowFileSelection = allowFileSelection;
             this.InitializeComponent();
             this.DataContext = this;
 
-            var dev = AdbSyncService.Instance.CurrentDevice;
-            DeviceNameText.Text = dev != null ? $"{dev.Model} ({dev.Serial})" : "";
+            if (IsWirelessMode)
+            {
+                var peer = CompanionSyncService.Instance.CurrentPeer!;
+                DeviceNameText.Text = peer.DisplayName;
+            }
+            else
+            {
+                var dev = AdbSyncService.Instance.CurrentDevice;
+                DeviceNameText.Text = dev != null ? $"[ADB] {dev.Model} ({dev.Serial})" : "";
+            }
+
+            if (_allowFileSelection)
+            {
+                NewFolderToggleBtn.Visibility = Visibility.Collapsed;
+            }
 
             if (!string.IsNullOrWhiteSpace(initialPath))
             {
@@ -60,13 +90,17 @@ namespace SyncDroidWinUI.Views
 
                 if (forceRefresh)
                 {
-                    AdbSyncService.Instance.ClearDirectoryCache();
+                    if (IsWirelessMode)
+                        CompanionSyncService.Instance.ClearDirectoryCache();
+                    else
+                        AdbSyncService.Instance.ClearDirectoryCache();
                 }
 
                 var rootFolder = new AndroidFolderNode
                 {
                     DisplayName = "/storage",
-                    FullPath = "/storage"
+                    FullPath = "/storage",
+                    IsDirectory = true
                 };
 
                 var rootNode = new TreeViewNode
@@ -111,23 +145,64 @@ namespace SyncDroidWinUI.Views
 
         private async Task PopulateNodeChildrenAsync(TreeViewNode parentNode, bool forceRefresh)
         {
-            if (parentNode.Content is not AndroidFolderNode parentFolder) return;
+            if (parentNode.Content is not AndroidFolderNode parentFolder || !parentFolder.IsDirectory) return;
 
             parentNode.Children.Clear();
-            var subDirs = await AdbSyncService.Instance.GetRemoteSubdirectoriesAsync(parentFolder.FullPath, forceRefresh);
-            foreach (var dirName in subDirs)
+
+            if (_allowFileSelection &&
+                parentFolder.FullPath != "/storage" &&
+                parentFolder.FullPath != "/storage/emulated")
             {
-                var fullPath = $"{parentFolder.FullPath.TrimEnd('/')}/{dirName}";
-                var childNode = new TreeViewNode
+                List<RemoteEntryDto> entries;
+                if (IsWirelessMode)
                 {
-                    Content = new AndroidFolderNode
+                    var listing = await CompanionSyncService.Instance.GetRemoteDirectoryListingAsync(parentFolder.FullPath, includeFiles: true);
+                    entries = listing.Entries;
+                }
+                else
+                {
+                    entries = await AdbSyncService.Instance.GetRemoteEntriesAsync(parentFolder.FullPath);
+                }
+
+                foreach (var entry in entries)
+                {
+                    var fullPath = !string.IsNullOrWhiteSpace(entry.FullPath)
+                        ? entry.FullPath
+                        : $"{parentFolder.FullPath.TrimEnd('/')}/{entry.Name}";
+                    var childNode = new TreeViewNode
                     {
-                        DisplayName = dirName,
-                        FullPath = fullPath
-                    },
-                    HasUnrealizedChildren = true
-                };
-                parentNode.Children.Add(childNode);
+                        Content = new AndroidFolderNode
+                        {
+                            DisplayName = entry.Name,
+                            FullPath = fullPath,
+                            IsDirectory = entry.IsDirectory
+                        },
+                        HasUnrealizedChildren = entry.IsDirectory
+                    };
+                    parentNode.Children.Add(childNode);
+                }
+            }
+            else
+            {
+                var subDirs = IsWirelessMode
+                    ? await CompanionSyncService.Instance.GetRemoteSubdirectoriesAsync(parentFolder.FullPath, forceRefresh)
+                    : await AdbSyncService.Instance.GetRemoteSubdirectoriesAsync(parentFolder.FullPath, forceRefresh);
+
+                foreach (var dirName in subDirs)
+                {
+                    var fullPath = $"{parentFolder.FullPath.TrimEnd('/')}/{dirName}";
+                    var childNode = new TreeViewNode
+                    {
+                        Content = new AndroidFolderNode
+                        {
+                            DisplayName = dirName,
+                            FullPath = fullPath,
+                            IsDirectory = true
+                        },
+                        HasUnrealizedChildren = true
+                    };
+                    parentNode.Children.Add(childNode);
+                }
             }
 
             parentNode.HasUnrealizedChildren = false;
@@ -160,10 +235,12 @@ namespace SyncDroidWinUI.Views
             {
                 _selectedTreeNode = node;
                 SelectedPathBox.Text = folder.FullPath;
+                SelectedIsDirectory = folder.IsDirectory;
             }
             else if (args.InvokedItem is AndroidFolderNode directFolder)
             {
                 SelectedPathBox.Text = directFolder.FullPath;
+                SelectedIsDirectory = directFolder.IsDirectory;
             }
         }
 
@@ -190,11 +267,14 @@ namespace SyncDroidWinUI.Views
                 LoadingRing.IsActive = true;
 
                 var parentPath = SelectedPath;
-                var createdPath = await AdbSyncService.Instance.CreateRemoteDirectoryAsync(parentPath, folderName);
+                var createdPath = IsWirelessMode
+                    ? await CompanionSyncService.Instance.CreateRemoteDirectoryAsync(parentPath, folderName)
+                    : await AdbSyncService.Instance.CreateRemoteDirectoryAsync(parentPath, folderName);
 
                 NewFolderNameBox.Text = "";
                 NewFolderBar.Visibility = Visibility.Collapsed;
                 SelectedPathBox.Text = createdPath;
+                SelectedIsDirectory = true;
 
                 if (_selectedTreeNode != null && (_selectedTreeNode.Content as AndroidFolderNode)?.FullPath == parentPath)
                 {

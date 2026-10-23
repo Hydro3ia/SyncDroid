@@ -26,7 +26,8 @@
             <Grid ColumnSpacing="10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="3*" MinWidth="90" MaxWidth="240"/>
+                    <ColumnDefinition Width="3*" MinWidth="160" MaxWidth="320"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="1*" MinWidth="0"/>
                     <ColumnDefinition Width="Auto"/>
@@ -42,7 +43,7 @@
                     Grid.Column="1"
                     x:Name="DeviceComboBox"
                     DisplayMemberPath="Name"
-                    SelectedValuePath="Serial"
+                    SelectedValuePath="Id"
                     HorizontalAlignment="Stretch"
                     PlaceholderText="{Binding Loc.NoDevicePlaceholder, Mode=OneWay}"
                     SelectionChanged="DeviceComboBox_SelectionChanged"
@@ -55,7 +56,14 @@
                     </StackPanel>
                 </Button>
 
-                <Button Grid.Column="4" Click="SettingsButton_Click" VerticalAlignment="Center" HorizontalAlignment="Right" Padding="12,6">
+                <Button Grid.Column="3" Click="WirelessConnect_Click" VerticalAlignment="Center" Padding="12,6">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE701;" FontSize="13"/>
+                        <TextBlock Text="{Binding Loc.WirelessConnectButton, Mode=OneWay}"/>
+                    </StackPanel>
+                </Button>
+
+                <Button Grid.Column="5" Click="SettingsButton_Click" VerticalAlignment="Center" HorizontalAlignment="Right" Padding="12,6">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE713;" FontSize="14"/>
                         <TextBlock Text="{Binding Loc.SettingsButton, Mode=OneWay}"/>
@@ -64,7 +72,7 @@
             </Grid>
         </Border>
 
-        <!-- Main Sync Direction Tabs -->
+        <!-- Main Sync & Direct Transfer Tabs -->
         <TabView
             x:Name="MainTabView"
             Grid.Row="1"
@@ -84,6 +92,13 @@
                         <SymbolIconSource Symbol="Download"/>
                     </TabViewItem.IconSource>
                     <Frame x:Name="AndroidToPcFrame"/>
+                </TabViewItem>
+
+                <TabViewItem Header="{Binding Loc.TabDirectTransfer, Mode=OneWay}" IsClosable="False">
+                    <TabViewItem.IconSource>
+                        <SymbolIconSource Symbol="Send"/>
+                    </TabViewItem.IconSource>
+                    <Frame x:Name="DirectTransferFrame"/>
                 </TabViewItem>
             </TabView.TabItems>
         </TabView>
