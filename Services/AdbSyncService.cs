@@ -397,6 +397,24 @@ namespace SyncDroidWinUI.Services
             }
         }
 
+        public void DisconnectCurrentDevice()
+        {
+            var dev = CurrentDevice;
+            CurrentDevice = null;
+            if (dev != null && !string.IsNullOrWhiteSpace(dev.Serial) && dev.Serial.Contains(':'))
+            {
+                try
+                {
+                    int colon = dev.Serial.LastIndexOf(':');
+                    if (colon > 0 && int.TryParse(dev.Serial.Substring(colon + 1), out int port))
+                    {
+                        _client.Disconnect(new DnsEndPoint(dev.Serial.Substring(0, colon), port));
+                    }
+                }
+                catch { }
+            }
+        }
+
         #region adb track-devices Real-Time Monitor & Exit Cleanup
 
         private void NotifyUnauthorizedIfNeeded(string? serial)
@@ -692,6 +710,8 @@ namespace SyncDroidWinUI.Services
             var remoteFilesInfo = GetRemoteDirectoryTree(androidPath);
 
             int totalFiles = localFiles.Length;
+            long totalBytes = localFiles.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
+            long completedBytes = 0;
             int processed = 0;
             int phase1Weight = isMirrorMode ? 50 : 100;
 
@@ -700,18 +720,19 @@ namespace SyncDroidWinUI.Services
             {
                 token.ThrowIfCancellationRequested();
                 var relativePath = Path.GetRelativePath(pcPath, localFile).Replace('\\', '/');
+                var fileInfo = new FileInfo(localFile);
 
                 if (FileNameLengthHelper.IsFileNameOver255Bytes(localFile))
                 {
-                    logCallback($"Skipped (Filename > 255 bytes): {relativePath}");
                     processed++;
-                    progressCallback((processed * phase1Weight) / (totalFiles > 0 ? totalFiles : 1));
+                    completedBytes += fileInfo.Length;
+                    double skipPct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, totalFiles);
+                    logCallback($"Skipped (Filename > 255 bytes): {relativePath} | Overall: {skipPct:F1}% ({processed}/{totalFiles})");
+                    progressCallback((int)Math.Round((skipPct * phase1Weight) / 100.0));
                     continue;
                 }
 
                 var targetRemotePath = $"{androidPath}/{relativePath}";
-
-                var fileInfo = new FileInfo(localFile);
                 bool shouldPush = true;
 
                 if (remoteFilesInfo.TryGetValue(targetRemotePath, out var remoteStat))
@@ -719,14 +740,36 @@ namespace SyncDroidWinUI.Services
                     if (remoteStat.Size == (uint)fileInfo.Length)
                     {
                         shouldPush = false;
-                        logCallback($"Skipped (Identical): {relativePath}");
+                        processed++;
+                        completedBytes += fileInfo.Length;
+                        double skipPct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, totalFiles);
+                        logCallback($"Skipped (Identical): {relativePath} | Overall: {skipPct:F1}% ({processed}/{totalFiles})");
+                        progressCallback((int)Math.Round((skipPct * phase1Weight) / 100.0));
                     }
                 }
 
                 if (shouldPush)
                 {
-                    logCallback($"Pushing: {relativePath}");
-                    await PushFileAsync(fileInfo, targetRemotePath, token);
+                    long baseCompleted = completedBytes;
+                    int nextIdx = processed + 1;
+                    logCallback($"Pushing: {relativePath} ({FileHashHelper.FormatByteSize(fileInfo.Length)})");
+                    var (bytesSent, elapsedSec) = await PushFileAsync(
+                        fileInfo,
+                        targetRemotePath,
+                        token,
+                        (inFlightBytes, liveSpeed) =>
+                        {
+                            double livePct = FileHashHelper.CalculateOverallPercent(baseCompleted + inFlightBytes, totalBytes, processed, totalFiles);
+                            progressCallback((int)Math.Round((livePct * phase1Weight) / 100.0));
+                            logCallback($"Transferring: {relativePath} | Speed: {liveSpeed} | Overall: {livePct:F1}% ({nextIdx}/{totalFiles})");
+                        });
+
+                    processed++;
+                    completedBytes += fileInfo.Length;
+                    double donePct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, totalFiles);
+                    string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesSent > 0 ? bytesSent : fileInfo.Length, elapsedSec);
+                    logCallback($"Transferred: {relativePath} ({FileHashHelper.FormatByteSize(fileInfo.Length)}) | Speed: {avgSpeed} | Overall: {donePct:F1}% ({processed}/{totalFiles})");
+                    progressCallback((int)Math.Round((donePct * phase1Weight) / 100.0));
 
                     if (verifyHash)
                     {
@@ -739,9 +782,6 @@ namespace SyncDroidWinUI.Services
                         logCallback($"Hash verified ({algo}): {relativePath}");
                     }
                 }
-
-                processed++;
-                progressCallback((processed * phase1Weight) / (totalFiles > 0 ? totalFiles : 1));
             }
 
             // 2. Delete remote files that don't exist on PC (only in /MIR Mirror mode)
@@ -805,6 +845,8 @@ namespace SyncDroidWinUI.Services
             var localFilesInfo = localFiles.ToDictionary(f => f, f => new FileInfo(f), StringComparer.OrdinalIgnoreCase);
 
             int totalFiles = remoteFilesInfo.Count;
+            long totalBytes = remoteFilesInfo.Values.Sum(v => (long)v.Size);
+            long completedBytes = 0;
             int processed = 0;
             int phase1Weight = isMirrorMode ? 50 : 100;
             var expectedLocalPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -814,6 +856,7 @@ namespace SyncDroidWinUI.Services
             {
                 token.ThrowIfCancellationRequested();
                 var remoteFile = kvp.Key;
+                long fileSize = kvp.Value.Size;
                 var rawRelativePath = remoteFile.Substring(androidPath.Length).TrimStart('/');
                 var sanitizedRelPath = CompanionSyncService.SanitizeRelativePathForWindows(rawRelativePath);
                 var targetLocalPath = Path.Combine(pcPath, sanitizedRelPath.Replace('/', '\\'));
@@ -822,18 +865,41 @@ namespace SyncDroidWinUI.Services
                 bool shouldPull = true;
                 if (localFilesInfo.TryGetValue(targetLocalPath, out var localStat))
                 {
-                    if (localStat.Length == kvp.Value.Size)
+                    if (localStat.Length == fileSize)
                     {
                         shouldPull = false;
-                        logCallback($"Skipped (Identical): {sanitizedRelPath}");
+                        processed++;
+                        completedBytes += fileSize;
+                        double skipPct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, totalFiles);
+                        logCallback($"Skipped (Identical): {sanitizedRelPath} | Overall: {skipPct:F1}% ({processed}/{totalFiles})");
+                        progressCallback((int)Math.Round((skipPct * phase1Weight) / 100.0));
                     }
                 }
 
                 if (shouldPull)
                 {
-                    logCallback($"Pulling: {sanitizedRelPath}");
+                    long baseCompleted = completedBytes;
+                    int nextIdx = processed + 1;
+                    logCallback($"Pulling: {sanitizedRelPath} ({FileHashHelper.FormatByteSize(fileSize)})");
                     Directory.CreateDirectory(Path.GetDirectoryName(targetLocalPath)!);
-                    await PullFileAsync(remoteFile, targetLocalPath, kvp.Value.Time.DateTime, token);
+                    var (bytesPulled, elapsedSec) = await PullFileAsync(
+                        remoteFile,
+                        targetLocalPath,
+                        kvp.Value.Time.DateTime,
+                        token,
+                        (inFlightBytes, liveSpeed) =>
+                        {
+                            double livePct = FileHashHelper.CalculateOverallPercent(baseCompleted + inFlightBytes, totalBytes, processed, totalFiles);
+                            progressCallback((int)Math.Round((livePct * phase1Weight) / 100.0));
+                            logCallback($"Transferring: {sanitizedRelPath} | Speed: {liveSpeed} | Overall: {livePct:F1}% ({nextIdx}/{totalFiles})");
+                        });
+
+                    processed++;
+                    completedBytes += fileSize;
+                    double donePct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, totalFiles);
+                    string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesPulled > 0 ? bytesPulled : fileSize, elapsedSec);
+                    logCallback($"Transferred: {sanitizedRelPath} ({FileHashHelper.FormatByteSize(fileSize)}) | Speed: {avgSpeed} | Overall: {donePct:F1}% ({processed}/{totalFiles})");
+                    progressCallback((int)Math.Round((donePct * phase1Weight) / 100.0));
 
                     if (verifyHash)
                     {
@@ -846,9 +912,6 @@ namespace SyncDroidWinUI.Services
                         logCallback($"Hash verified ({algo}): {sanitizedRelPath}");
                     }
                 }
-
-                processed++;
-                progressCallback((processed * phase1Weight) / (totalFiles > 0 ? totalFiles : 1));
             }
 
             // 2. Delete local files that don't exist on Android (only in /MIR Mirror mode)
@@ -905,6 +968,8 @@ namespace SyncDroidWinUI.Services
                 remoteTree = await Task.Run(() => GetRemoteDirectoryTree(targetAndroidDir), token);
             }
 
+            long totalBytes = filePlan.Sum(x => x.File.Length);
+            long completedBytes = 0;
             int processed = 0;
             foreach (var (fileInfo, relativeDestPath) in filePlan)
             {
@@ -912,9 +977,11 @@ namespace SyncDroidWinUI.Services
 
                 if (FileNameLengthHelper.IsFileNameOver255Bytes(fileInfo.FullName))
                 {
-                    logCallback($"Skipped (Filename > 255 bytes): {relativeDestPath}");
                     processed++;
-                    progressCallback((processed * 100) / total);
+                    completedBytes += fileInfo.Length;
+                    double skipPct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, total);
+                    logCallback($"Skipped (Filename > 255 bytes): {relativeDestPath} | Overall: {skipPct:F1}% ({processed}/{total})");
+                    progressCallback((int)Math.Round(skipPct));
                     continue;
                 }
 
@@ -925,9 +992,11 @@ namespace SyncDroidWinUI.Services
                     remoteTree.TryGetValue(remoteFullPath, out var existingStat) &&
                     existingStat.Size == (uint)fileInfo.Length)
                 {
-                    logCallback($"Skipped (Identical): {relativeDestPath}");
                     processed++;
-                    progressCallback((processed * 100) / total);
+                    completedBytes += fileInfo.Length;
+                    double skipPct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, total);
+                    logCallback($"Skipped (Identical): {relativeDestPath} | Overall: {skipPct:F1}% ({processed}/{total})");
+                    progressCallback((int)Math.Round(skipPct));
                     continue;
                 }
 
@@ -952,8 +1021,26 @@ namespace SyncDroidWinUI.Services
                     }
                 }
 
-                logCallback($"Pushing: {relativeDestPath}");
-                await PushFileAsync(fileInfo, remoteFullPath, token);
+                long baseCompleted = completedBytes;
+                int nextIdx = processed + 1;
+                logCallback($"Pushing: {relativeDestPath} ({FileHashHelper.FormatByteSize(fileInfo.Length)})");
+                var (bytesSent, elapsedSec) = await PushFileAsync(
+                    fileInfo,
+                    remoteFullPath,
+                    token,
+                    (inFlightBytes, liveSpeed) =>
+                    {
+                        double livePct = FileHashHelper.CalculateOverallPercent(baseCompleted + inFlightBytes, totalBytes, processed, total);
+                        progressCallback((int)Math.Round(livePct));
+                        logCallback($"Transferring: {relativeDestPath} | Speed: {liveSpeed} | Overall: {livePct:F1}% ({nextIdx}/{total})");
+                    });
+
+                processed++;
+                completedBytes += fileInfo.Length;
+                double donePct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, total);
+                string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesSent > 0 ? bytesSent : fileInfo.Length, elapsedSec);
+                logCallback($"Transferred: {relativeDestPath} ({FileHashHelper.FormatByteSize(fileInfo.Length)}) | Speed: {avgSpeed} | Overall: {donePct:F1}% ({processed}/{total})");
+                progressCallback((int)Math.Round(donePct));
 
                 if (verifyHash)
                 {
@@ -965,12 +1052,9 @@ namespace SyncDroidWinUI.Services
                     }
                     logCallback($"Hash verified ({algo}): {relativeDestPath}");
                 }
-
-                processed++;
-                progressCallback((processed * 100) / total);
             }
 
-            logCallback($"Direct transfer to device completed ({processed} file(s) processed).");
+            logCallback($"Direct transfer to device completed ({processed} file(s) processed | Overall: 100%).");
             progressCallback(100);
         }
 
@@ -1001,7 +1085,18 @@ namespace SyncDroidWinUI.Services
                 }
 
                 logCallback($"Pulling file: {remoteItemPath}");
-                await PullFileAsync(remoteItemPath, localTarget, DateTime.Now, token);
+                var (bytesPulled, elapsedSec) = await PullFileAsync(
+                    remoteItemPath,
+                    localTarget,
+                    DateTime.Now,
+                    token,
+                    (inFlightBytes, liveSpeed) =>
+                    {
+                        logCallback($"Transferring: {sanitizedName} ({FileHashHelper.FormatByteSize(inFlightBytes)}) | Speed: {liveSpeed}");
+                    });
+
+                string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesPulled, elapsedSec);
+                logCallback($"Transferred: {sanitizedName} ({FileHashHelper.FormatByteSize(bytesPulled)}) | Speed: {avgSpeed} | Overall: 100.0% (1/1)");
 
                 if (verifyHash)
                 {
@@ -1022,23 +1117,28 @@ namespace SyncDroidWinUI.Services
             logCallback($"Scanning device folder: {remoteItemPath}");
             var remoteFiles = await Task.Run(() => GetRemoteDirectoryTree(remoteItemPath), token);
             int total = remoteFiles.Count;
+            long totalBytes = remoteFiles.Values.Sum(v => (long)v.Size);
+            long completedBytes = 0;
             int processed = 0;
             string rootFolderName = CompanionSyncService.SanitizeRelativePathForWindows(itemName);
 
             foreach (var kvp in remoteFiles)
             {
                 token.ThrowIfCancellationRequested();
+                long fileSize = kvp.Value.Size;
                 string rawRel = kvp.Key.Substring(remoteItemPath.Length).TrimStart('/');
                 string sanitizedRel = CompanionSyncService.SanitizeRelativePathForWindows(rawRel);
                 string localTarget = Path.Combine(targetPcDir, rootFolderName, sanitizedRel.Replace('/', '\\'));
 
                 if (File.Exists(localTarget))
                 {
-                    if (conflictPolicy == ConflictPolicy.SkipIdenticalSize && new FileInfo(localTarget).Length == kvp.Value.Size)
+                    if (conflictPolicy == ConflictPolicy.SkipIdenticalSize && new FileInfo(localTarget).Length == fileSize)
                     {
-                        logCallback($"Skipped (Identical): {rootFolderName}/{sanitizedRel}");
                         processed++;
-                        progressCallback((processed * 100) / (total > 0 ? total : 1));
+                        completedBytes += fileSize;
+                        double skipPct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, total);
+                        logCallback($"Skipped (Identical): {rootFolderName}/{sanitizedRel} | Overall: {skipPct:F1}% ({processed}/{total})");
+                        progressCallback((int)Math.Round(skipPct));
                         continue;
                     }
                     if (conflictPolicy == ConflictPolicy.KeepBothRename)
@@ -1047,9 +1147,28 @@ namespace SyncDroidWinUI.Services
                     }
                 }
 
+                long baseCompleted = completedBytes;
+                int nextIdx = processed + 1;
                 Directory.CreateDirectory(Path.GetDirectoryName(localTarget)!);
-                logCallback($"Pulling: {rootFolderName}/{sanitizedRel}");
-                await PullFileAsync(kvp.Key, localTarget, kvp.Value.Time.DateTime, token);
+                logCallback($"Pulling: {rootFolderName}/{sanitizedRel} ({FileHashHelper.FormatByteSize(fileSize)})");
+                var (bytesPulled, elapsedSec) = await PullFileAsync(
+                    kvp.Key,
+                    localTarget,
+                    kvp.Value.Time.DateTime,
+                    token,
+                    (inFlightBytes, liveSpeed) =>
+                    {
+                        double livePct = FileHashHelper.CalculateOverallPercent(baseCompleted + inFlightBytes, totalBytes, processed, total);
+                        progressCallback((int)Math.Round(livePct));
+                        logCallback($"Transferring: {rootFolderName}/{sanitizedRel} | Speed: {liveSpeed} | Overall: {livePct:F1}% ({nextIdx}/{total})");
+                    });
+
+                processed++;
+                completedBytes += fileSize;
+                double donePct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, total);
+                string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesPulled > 0 ? bytesPulled : fileSize, elapsedSec);
+                logCallback($"Transferred: {rootFolderName}/{sanitizedRel} ({FileHashHelper.FormatByteSize(fileSize)}) | Speed: {avgSpeed} | Overall: {donePct:F1}% ({processed}/{total})");
+                progressCallback((int)Math.Round(donePct));
 
                 if (verifyHash)
                 {
@@ -1061,12 +1180,9 @@ namespace SyncDroidWinUI.Services
                     }
                     logCallback($"Hash verified ({algo}): {rootFolderName}/{sanitizedRel}");
                 }
-
-                processed++;
-                progressCallback((processed * 100) / (total > 0 ? total : 1));
             }
 
-            logCallback($"Direct pull from device completed ({processed} file(s)).");
+            logCallback($"Direct pull from device completed ({processed} file(s) | Overall: 100%).");
             progressCallback(100);
         }
 
@@ -1161,7 +1277,11 @@ namespace SyncDroidWinUI.Services
             return result;
         }
 
-        private Task PushFileAsync(FileInfo localFileInfo, string remotePath, CancellationToken token)
+        private Task<(long BytesTransferred, double ElapsedSeconds)> PushFileAsync(
+            FileInfo localFileInfo,
+            string remotePath,
+            CancellationToken token,
+            Action<long, string>? onProgressCallback = null)
         {
             return Task.Run(() =>
             {
@@ -1173,9 +1293,10 @@ namespace SyncDroidWinUI.Services
 
                 try
                 {
-                    using var stream = File.OpenRead(localPath);
+                    using var stream = new ProgressTrackingStream(File.OpenRead(localPath), onProgressCallback);
                     using var syncService = new SyncService(_client, CurrentDevice);
                     syncService.Push(stream, ToAdbString(remotePath), 420, localFileInfo.LastWriteTime, null, token);
+                    return (stream.TotalBytesTransferred, stream.ElapsedSeconds);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1191,13 +1312,14 @@ namespace SyncDroidWinUI.Services
 
                     try
                     {
-                        using var stream = File.OpenRead(localPath);
+                        using var stream = new ProgressTrackingStream(File.OpenRead(localPath), onProgressCallback);
                         using var syncService = new SyncService(_client, CurrentDevice);
                         syncService.Push(stream, tempPath, 420, localFileInfo.LastWriteTime, null, token);
 
                         var qTemp = EscapeShellSingleQuotes(tempPath);
                         var qTarget = EscapeShellSingleQuotes(remotePath);
                         ExecuteUtf8ShellScript($"mv -f {qTemp} {qTarget} || (cp -f {qTemp} {qTarget} && rm -f {qTemp})");
+                        return (stream.TotalBytesTransferred, stream.ElapsedSeconds);
                     }
                     catch (OperationCanceledException)
                     {
@@ -1213,21 +1335,30 @@ namespace SyncDroidWinUI.Services
             }, token);
         }
 
-        private Task PullFileAsync(string remotePath, string localPath, DateTime remoteTime, CancellationToken token)
+        private Task<(long BytesTransferred, double ElapsedSeconds)> PullFileAsync(
+            string remotePath,
+            string localPath,
+            DateTime remoteTime,
+            CancellationToken token,
+            Action<long, string>? onProgressCallback = null)
         {
             return Task.Run(() =>
             {
                 string parentDir = Path.GetDirectoryName(localPath) ?? @"C:\";
                 Directory.CreateDirectory(parentDir);
                 string tempLocalPart = Path.Combine(parentDir, $".syncdroid_{Guid.NewGuid():N}.part");
+                long bytesPulled = 0;
+                double elapsedSec = 0;
 
                 try
                 {
                     try
                     {
-                        using var stream = File.Create(tempLocalPart);
+                        using var stream = new ProgressTrackingStream(File.Create(tempLocalPart), onProgressCallback);
                         using var syncService = new SyncService(_client, CurrentDevice);
                         syncService.Pull(ToAdbString(remotePath), stream, null, token);
+                        bytesPulled = stream.TotalBytesTransferred;
+                        elapsedSec = stream.ElapsedSeconds;
                     }
                     catch (OperationCanceledException)
                     {
@@ -1243,9 +1374,11 @@ namespace SyncDroidWinUI.Services
                         ExecuteUtf8ShellScript($"cp -f {qRemote} {qTemp}");
                         try
                         {
-                            using var stream = File.Create(tempLocalPart);
+                            using var stream = new ProgressTrackingStream(File.Create(tempLocalPart), onProgressCallback);
                             using var syncService = new SyncService(_client, CurrentDevice);
                             syncService.Pull(tempPath, stream, null, token);
+                            bytesPulled = stream.TotalBytesTransferred;
+                            elapsedSec = stream.ElapsedSeconds;
                         }
                         finally
                         {
@@ -1260,6 +1393,8 @@ namespace SyncDroidWinUI.Services
                         File.SetLastWriteTime(localPath, remoteTime);
                     }
                     catch { }
+
+                    return (bytesPulled, elapsedSec);
                 }
                 catch
                 {

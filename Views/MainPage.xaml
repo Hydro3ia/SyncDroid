@@ -26,10 +26,12 @@
             <Grid ColumnSpacing="10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="3*" MinWidth="160" MaxWidth="320"/>
+                    <ColumnDefinition Width="3*" MinWidth="200" MaxWidth="360"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="1*" MinWidth="0"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
@@ -49,21 +51,45 @@
                     SelectionChanged="DeviceComboBox_SelectionChanged"
                     VerticalAlignment="Center"/>
 
-                <Button Grid.Column="2" Click="RefreshAdb_Click" VerticalAlignment="Center" Padding="12,6">
+                <Button
+                    Grid.Column="2"
+                    x:Name="DisconnectDeviceButton"
+                    Click="DisconnectDevice_Click"
+                    IsEnabled="False"
+                    ToolTipService.ToolTip="{Binding Loc.DisconnectDeviceTooltip, Mode=OneWay}"
+                    VerticalAlignment="Center"
+                    Padding="12,6">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                        <TextBlock Text="{Binding Loc.DisconnectDeviceButton, Mode=OneWay}"/>
+                    </StackPanel>
+                </Button>
+
+                <Button Grid.Column="3" Click="RefreshAdb_Click" VerticalAlignment="Center" Padding="12,6">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE72C;" FontSize="13"/>
                         <TextBlock Text="{Binding Loc.RefreshAdbButton, Mode=OneWay}"/>
                     </StackPanel>
                 </Button>
 
-                <Button Grid.Column="3" Click="WirelessConnect_Click" VerticalAlignment="Center" Padding="12,6">
+                <Button Grid.Column="4" Click="WirelessConnect_Click" VerticalAlignment="Center" Padding="12,6">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE701;" FontSize="13"/>
                         <TextBlock Text="{Binding Loc.WirelessConnectButton, Mode=OneWay}"/>
                     </StackPanel>
                 </Button>
 
-                <Button Grid.Column="5" Click="SettingsButton_Click" VerticalAlignment="Center" HorizontalAlignment="Right" Padding="12,6">
+                <Button
+                    Grid.Column="6"
+                    Click="ConnectionHelpButton_Click"
+                    ToolTipService.ToolTip="{Binding Loc.ConnectionHelpTooltip, Mode=OneWay}"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Right"
+                    Padding="10,6">
+                    <FontIcon Glyph="&#xE897;" FontSize="14"/>
+                </Button>
+
+                <Button Grid.Column="7" Click="SettingsButton_Click" VerticalAlignment="Center" HorizontalAlignment="Right" Padding="12,6">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE713;" FontSize="14"/>
                         <TextBlock Text="{Binding Loc.SettingsButton, Mode=OneWay}"/>
