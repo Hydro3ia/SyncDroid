@@ -47,9 +47,56 @@ namespace SyncDroidWinUI.Services
         // Title bar & Top bar
         public string AppSubtitle => T("ADB, Wireless Companion & LocalSend Sync", "ADB、无线伴侣与 LocalSend 传输同步工具", "ADB、無線伴侶與 LocalSend 傳輸同步工具");
         public string AndroidDeviceLabel => T("Target Device", "连接设备", "連接裝置");
-        public string NoDevicePlaceholder => T("No online ADB, Companion or LocalSend device", "未检测到在线 ADB、无线伴侣或 LocalSend 设备", "未偵測到線上 ADB、無線伴侶或 LocalSend 裝置");
+        public string NoDevicePlaceholder => T(
+            "Need help with connecting? Check ? button on the right",
+            "连接遇到困难？请点击右侧的 ? 按钮查看帮助",
+            "連接遇到困難？請點擊右側的 ? 按鈕查看說明");
+        public string DisconnectDeviceButton => T("Disconnect", "断开连接", "中斷連接");
+        public string DisconnectDeviceTooltip => T("Disconnect current device", "断开当前连接的设备", "中斷目前連接的裝置");
         public string RefreshAdbButton => T("Refresh Devices", "刷新设备", "重新整理裝置");
         public string WirelessConnectButton => T("Wireless Connect", "无线连接", "無線連接");
+        public string ConnectionHelpTooltip => T("How to enable Developer Options & USB Debugging", "如何开启 Android 开发者模式与 USB 调试", "如何開啟 Android 開發人員選項與 USB 偵錯");
+        public string ConnectionHelpDialogTitle => T(
+            "How to Enable Developer Options & USB Debugging on Android",
+            "如何在 Android 上开启开发者模式与打开 USB 调试",
+            "如何在 Android 上開啟開發人員模式與打開 USB 偵錯");
+        public string ConnectionHelpDialogContent => T(
+            "1. Enable Developer Options:\n" +
+            "   • Open the \"Settings\" app on your Android phone or tablet.\n" +
+            "   • Tap \"About phone\" (or \"About tablet\" / \"My device\").\n" +
+            "   • Locate \"Build number\" (Xiaomi/HyperOS: \"OS version\" / \"MIUI version\"; Samsung: \"Software information\" ➔ \"Build number\").\n" +
+            "   • Tap \"Build number\" 7 times rapidly until you see \"You are now a developer!\" (enter your lock screen PIN if prompted).\n\n" +
+            "2. Turn On USB Debugging:\n" +
+            "   • Return to main \"Settings\" and open \"System\" ➔ \"Developer options\" (or \"Additional settings\" ➔ \"Developer options\").\n" +
+            "   • Scroll down and turn ON \"USB debugging\".\n" +
+            "   • (Tip: On Xiaomi/OPPO/vivo devices, also enable \"USB debugging (Security settings)\" if present, and set USB mode to \"File Transfer / MTP\").\n\n" +
+            "3. Authorize Connection on Your Phone:\n" +
+            "   • Connect your device to the PC via a USB data cable and click \"Refresh Devices\".\n" +
+            "   • Unlock your phone screen, check \"Always allow from this computer\" in the \"Allow USB debugging?\" popup, and tap \"Allow / OK\".",
+            "1. 开启「开发者选项（开发者模式）」：\n" +
+            "   • 打开 Android 手机或平板上的系统「设置 (Settings)」。\n" +
+            "   • 进入「关于手机」（或「关于本机」/「我的设备」）。\n" +
+            "   • 找到「版本号 (Build number)」（小米澎湃 OS / MIUI 请点击「OS 版本」或「MIUI 版本」；三星请进入「软件信息」➔「编译编号」；OPPO / vivo 请进入「版本信息」➔「版本号」）。\n" +
+            "   • 连续快速点击「版本号」7 次，直到屏幕提示「您已处于开发者模式！」（若提示输入锁屏密码请验证）。\n\n" +
+            "2. 打开「USB 调试」：\n" +
+            "   • 返回系统「设置」主界面，进入「系统与更新」➔「开发者选项」（或「更多设置」/「其他设置」➔「开发者选项」）。\n" +
+            "   • 向下滚动找到并打开「USB 调试 (USB debugging)」开关，在弹出的确认框中点击「确定」。\n" +
+            "   • （提示：小米等国产机型建议同时开启「USB 调试（安全设置）」，并将 USB 连接用途设为「传输文件 / MTP」）。\n\n" +
+            "3. 在手机上确认授权：\n" +
+            "   • 使用支持数据传输的 USB 线连接手机与电脑，点击顶部的「刷新设备」。\n" +
+            "   • 保持手机屏幕解锁，在手机弹出的「允许 USB 调试吗？」窗口中勾选「始终允许使用这台计算机进行调试」，并点击「允许 / 确定」。",
+            "1. 開啟「開發人員選項（開發者模式）」：\n" +
+            "   • 打開 Android 手機或平板上的系統「設定 (Settings)」。\n" +
+            "   • 進入「關於手機」（或「關於本機」/「我的裝置」）。\n" +
+            "   • 找到「版本號碼 (Build number)」（小米澎湃 OS / MIUI 請點擊「OS 版本」或「MIUI 版本」；三星請進入「軟體資訊」➔「版本號碼」；OPPO / vivo 請進入「版本資訊」➔「版本號碼」）。\n" +
+            "   • 連續快速點擊「版本號碼」7 次，直到畫面提示「您已成為開發人員！」（若提示輸入鎖定畫面密碼請完成驗證）。\n\n" +
+            "2. 打開「USB 偵錯」：\n" +
+            "   • 返回系統「設定」主畫面，進入「系統」➔「開發人員選項」（或「更多設定」/「進階設定」➔「開發人員選項」）。\n" +
+            "   • 向下捲動找到並打開「USB 偵錯 (USB debugging)」開關，在彈出的確認視窗中點擊「確定」。\n" +
+            "   • （提示：部分機型建議同時開啟「USB 偵錯（安全設定）」，並將 USB 用途設為「檔案傳輸 / MTP」）。\n\n" +
+            "3. 在手機上確認授權：\n" +
+            "   • 使用支援資料傳輸的 USB 傳輸線連接手機與電腦，點擊頂部的「重新整理裝置」。\n" +
+            "   • 保持手機螢幕解鎖，在手機彈出的「允許 USB 偵錯嗎？」視窗中勾選「一律允許透過這台電腦進行偵錯」，並點擊「允許 / 確定」。");
         public string SettingsButton => T("Settings", "设置", "設定");
 
         // Wireless Companion & LocalSend Connect Dialog

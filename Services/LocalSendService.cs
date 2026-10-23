@@ -40,6 +40,23 @@ namespace SyncDroidWinUI.Services
         public string? LastServerError { get; private set; }
         public bool IsAccessForbiddenError { get; private set; }
 
+        public void DisconnectCurrentPeer()
+        {
+            var peer = CurrentPeer;
+            CurrentPeer = null;
+            if (peer != null)
+            {
+                _discoveredPeers.TryRemove(peer.Endpoint, out _);
+            }
+
+            var settings = SettingsService.Load();
+            if (!string.IsNullOrEmpty(settings.LastLocalSendIpEndpoint))
+            {
+                settings.LastLocalSendIpEndpoint = "";
+                SettingsService.Save(settings);
+            }
+        }
+
         public event Action<string>? ServerActivityLogged;
 
         private readonly HttpClient _httpClient;
@@ -580,20 +597,29 @@ namespace SyncDroidWinUI.Services
                 string tempPart = Path.Combine(parentDir, $".syncdroid_{Guid.NewGuid():N}.part");
                 try
                 {
-                    using (var fs = new FileStream(tempPart, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
+                    long bytesReceived = 0;
+                    double elapsedSec = 0;
+                    using (var rawFs = new FileStream(tempPart, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
+                    using (var trackedFs = new ProgressTrackingStream(rawFs, (inFlightBytes, liveSpeed) =>
+                    {
+                        double livePct = FileHashHelper.CalculateOverallPercent(inFlightBytes, fileDto.Size, 0, 1);
+                        LogServerActivity($"Receiving: {sanitizedRel} | Speed: {liveSpeed} | Overall: {livePct:F1}%");
+                    }))
                     {
                         if (isChunked)
                         {
-                            await CopyChunkedBodyToStreamAsync(bodyStream, fs, ct);
+                            await CopyChunkedBodyToStreamAsync(bodyStream, trackedFs, ct);
                         }
                         else if (contentLength >= 0)
                         {
-                            await CopyExactBytesAsync(bodyStream, fs, contentLength, ct);
+                            await CopyExactBytesAsync(bodyStream, trackedFs, contentLength, ct);
                         }
                         else
                         {
-                            await bodyStream.CopyToAsync(fs, 65536, ct);
+                            await bodyStream.CopyToAsync(trackedFs, 65536, ct);
                         }
+                        bytesReceived = trackedFs.TotalBytesTransferred;
+                        elapsedSec = trackedFs.ElapsedSeconds;
                     }
 
                     if (settings.VerifyHashAfterTransfer && !string.IsNullOrWhiteSpace(fileDto.Sha256))
@@ -619,7 +645,8 @@ namespace SyncDroidWinUI.Services
                         catch { }
                     }
 
-                    LogServerActivity($"Received file from '{session.SenderAlias}': {finalTarget}");
+                    string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesReceived, elapsedSec);
+                    LogServerActivity($"Received file from '{session.SenderAlias}': {finalTarget} ({FileHashHelper.FormatByteSize(bytesReceived)}) | Speed: {avgSpeed} | Overall: 100%");
                     await WriteJsonResponseAsync(stream, 200, "OK", new { ok = true }, ct);
                 }
                 catch
@@ -857,6 +884,8 @@ namespace SyncDroidWinUI.Services
 
                 string sessionId = prepResp.SessionId;
                 int total = validPlan.Count;
+                long totalBytes = validPlan.Sum(x => x.FileInfo.Length);
+                long completedBytes = 0;
                 int processed = 0;
 
                 try
@@ -869,28 +898,48 @@ namespace SyncDroidWinUI.Services
                             !prepResp.Files.TryGetValue(item.FileId, out var fileToken) ||
                             string.IsNullOrEmpty(fileToken))
                         {
-                            logCallback($"Skipped by receiver: {item.RelativeDestPath}");
                             processed++;
-                            progressCallback((processed * 100) / total);
+                            completedBytes += item.FileInfo.Length;
+                            double skipPct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, total);
+                            logCallback($"Skipped by receiver: {item.RelativeDestPath} | Overall: {skipPct:F1}% ({processed}/{total})");
+                            progressCallback((int)Math.Round(skipPct));
                             continue;
                         }
 
-                        logCallback($"Pushing [LocalSend]: {item.RelativeDestPath}");
+                        long baseCompleted = completedBytes;
+                        int nextIdx = processed + 1;
+                        logCallback($"Pushing [LocalSend]: {item.RelativeDestPath} ({FileHashHelper.FormatByteSize(item.FileInfo.Length)})");
                         string uploadUrl =
                             $"{baseUrl}/api/localsend/v2/upload?sessionId={Uri.EscapeDataString(sessionId)}" +
                             $"&fileId={Uri.EscapeDataString(item.FileId)}" +
                             $"&token={Uri.EscapeDataString(fileToken)}";
 
-                        using var fs = new FileStream(item.FileInfo.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, useAsync: true);
-                        using var streamContent = new StreamContent(fs, 65536);
-                        streamContent.Headers.ContentLength = item.FileInfo.Length;
-                        streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+                        long bytesSent = 0;
+                        double elapsedSec = 0;
+                        using (var rawFs = new FileStream(item.FileInfo.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, useAsync: true))
+                        using (var trackedStream = new ProgressTrackingStream(rawFs, (inFlightBytes, liveSpeed) =>
+                        {
+                            double livePct = FileHashHelper.CalculateOverallPercent(baseCompleted + inFlightBytes, totalBytes, processed, total);
+                            progressCallback((int)Math.Round(livePct));
+                            logCallback($"Transferring [LocalSend]: {item.RelativeDestPath} | Speed: {liveSpeed} | Overall: {livePct:F1}% ({nextIdx}/{total})");
+                        }))
+                        using (var streamContent = new StreamContent(trackedStream, 65536))
+                        {
+                            streamContent.Headers.ContentLength = item.FileInfo.Length;
+                            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
 
-                        using var uploadResp = await _httpClient.PostAsync(uploadUrl, streamContent, token);
-                        uploadResp.EnsureSuccessStatusCode();
+                            using var uploadResp = await _httpClient.PostAsync(uploadUrl, streamContent, token);
+                            uploadResp.EnsureSuccessStatusCode();
+                            bytesSent = trackedStream.TotalBytesTransferred;
+                            elapsedSec = trackedStream.ElapsedSeconds;
+                        }
 
                         processed++;
-                        progressCallback((processed * 100) / total);
+                        completedBytes += item.FileInfo.Length;
+                        double donePct = FileHashHelper.CalculateOverallPercent(completedBytes, totalBytes, processed, total);
+                        string avgSpeed = FileHashHelper.FormatTransferSpeed(bytesSent > 0 ? bytesSent : item.FileInfo.Length, elapsedSec);
+                        logCallback($"Transferred [LocalSend]: {item.RelativeDestPath} ({FileHashHelper.FormatByteSize(item.FileInfo.Length)}) | Speed: {avgSpeed} | Overall: {donePct:F1}% ({processed}/{total})");
+                        progressCallback((int)Math.Round(donePct));
                     }
                 }
                 catch (OperationCanceledException)
@@ -904,7 +953,7 @@ namespace SyncDroidWinUI.Services
                     throw;
                 }
 
-                logCallback($"Direct transfer to device '{peer.Alias}' completed ({processed} file(s) processed).");
+                logCallback($"Direct transfer to device '{peer.Alias}' completed ({processed} file(s) processed | Overall: 100%).");
                 progressCallback(100);
             }
         }

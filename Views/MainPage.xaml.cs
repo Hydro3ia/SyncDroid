@@ -130,6 +130,37 @@ namespace SyncDroidWinUI.Views
             }
         }
 
+        private async void ConnectionHelpButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (this.XamlRoot == null) return;
+
+            var scrollViewer = new ScrollViewer
+            {
+                MaxHeight = 420,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = new TextBlock
+                {
+                    Text = Loc.ConnectionHelpDialogContent,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontSize = 13,
+                    LineHeight = 22,
+                    IsTextSelectionEnabled = true,
+                    Width = 500
+                }
+            };
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.XamlRoot,
+                Title = Loc.ConnectionHelpDialogTitle,
+                Content = scrollViewer,
+                CloseButtonText = Loc.AdbUnauthorizedDialogOkButton,
+                DefaultButton = ContentDialogButton.Close
+            };
+
+            await dialog.ShowAsync();
+        }
+
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
             if (SettingsView.Visibility == Visibility.Visible)
@@ -231,6 +262,7 @@ namespace SyncDroidWinUI.Views
                     }
 
                     DeviceComboBox.SelectedIndex = targetIndex;
+                    DisconnectDeviceButton.IsEnabled = true;
                     DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.MediumSeaGreen);
                 }
                 else
@@ -239,6 +271,7 @@ namespace SyncDroidWinUI.Views
                     AdbSyncService.Instance.CurrentDevice = null;
                     CompanionSyncService.Instance.CurrentPeer = null;
                     LocalSendService.Instance.CurrentPeer = null;
+                    DisconnectDeviceButton.IsEnabled = false;
                     DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
                 }
             }
@@ -248,6 +281,7 @@ namespace SyncDroidWinUI.Views
                 AdbSyncService.Instance.CurrentDevice = null;
                 CompanionSyncService.Instance.CurrentPeer = null;
                 LocalSendService.Instance.CurrentPeer = null;
+                DisconnectDeviceButton.IsEnabled = false;
                 DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
             }
             finally
@@ -256,10 +290,54 @@ namespace SyncDroidWinUI.Views
             }
         }
 
+        private void DisconnectDevice_Click(object sender, RoutedEventArgs e)
+        {
+            if (DeviceComboBox.SelectedItem is ConnectedDeviceItem selected)
+            {
+                if (selected.Mode == ConnectionMode.WirelessCompanion)
+                {
+                    CompanionSyncService.Instance.DisconnectCurrentPeer();
+                }
+                else if (selected.Mode == ConnectionMode.LocalSend)
+                {
+                    LocalSendService.Instance.DisconnectCurrentPeer();
+                }
+                else if (selected.Mode == ConnectionMode.Adb)
+                {
+                    AdbSyncService.Instance.DisconnectCurrentDevice();
+                }
+
+                if (DeviceComboBox.ItemsSource is List<ConnectedDeviceItem> currentList)
+                {
+                    var remaining = currentList.Where(i => !string.Equals(i.Id, selected.Id, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (remaining.Count > 0)
+                    {
+                        DeviceComboBox.ItemsSource = remaining;
+                        DeviceComboBox.SelectedIndex = -1;
+                    }
+                    else
+                    {
+                        DeviceComboBox.ItemsSource = null;
+                    }
+                }
+                else
+                {
+                    DeviceComboBox.SelectedIndex = -1;
+                }
+            }
+
+            AdbSyncService.Instance.CurrentDevice = null;
+            CompanionSyncService.Instance.CurrentPeer = null;
+            LocalSendService.Instance.CurrentPeer = null;
+            DisconnectDeviceButton.IsEnabled = false;
+            DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+        }
+
         private void DeviceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (DeviceComboBox.SelectedItem is ConnectedDeviceItem selected)
             {
+                DisconnectDeviceButton.IsEnabled = true;
                 if (selected.Mode == ConnectionMode.WirelessCompanion && selected.CompanionPeer != null)
                 {
                     CompanionSyncService.Instance.CurrentPeer = selected.CompanionPeer;
@@ -278,6 +356,10 @@ namespace SyncDroidWinUI.Views
                     CompanionSyncService.Instance.ActiveConnectionMode = ConnectionMode.Adb;
                     DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.MediumSeaGreen);
                 }
+            }
+            else
+            {
+                DisconnectDeviceButton.IsEnabled = false;
             }
         }
 
