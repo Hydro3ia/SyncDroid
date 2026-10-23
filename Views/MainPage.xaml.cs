@@ -33,6 +33,7 @@ namespace SyncDroidWinUI.Views
         private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
         private ContentDialog? _activeUnauthorizedDialog;
         private string? _activeUnauthorizedSerial;
+        private ContentDialog? _activeIncomingConfirmDialog;
 
         public MainPage()
         {
@@ -43,14 +44,191 @@ namespace SyncDroidWinUI.Views
             PcToAndroidFrame.Navigate(typeof(SyncPage), new SyncViewModel(isPcToAndroid: true));
             AndroidToPcFrame.Navigate(typeof(SyncPage), new SyncViewModel(isPcToAndroid: false));
             DirectTransferFrame.Navigate(typeof(DirectTransferPage));
+            ReceiveFrame.Navigate(typeof(ReceivePage));
+
+            if (ReceiveFrame.Content is ReceivePage receivePage)
+            {
+                receivePage.ConfirmationResolvedFromBanner += () =>
+                {
+                    _dispatcherQueue?.TryEnqueue(() =>
+                    {
+                        try { _activeIncomingConfirmDialog?.Hide(); } catch { }
+                    });
+                };
+            }
 
             SettingsView.BackRequested += (_, _) => ShowSyncTabs();
             SettingsView.AdbConfigChanged += (_, _) => _ = RefreshDeviceStatusAsync();
+            SettingsView.ManageDevicesRequested += (_, _) => ShowManageDevicesPage();
+            ManageDevicesView.BackRequested += (_, _) => ShowSettingsPage();
+
+            SettingsService.TrustedDevicesChanged += (_, _) =>
+            {
+                _dispatcherQueue?.TryEnqueue(() =>
+                {
+                    if (DeviceComboBox.SelectedItem is ConnectedDeviceItem sel &&
+                        sel.Mode == ConnectionMode.WirelessCompanion &&
+                        sel.CompanionPeer != null &&
+                        !SettingsService.IsDeviceTrusted("SyncDroid", null, sel.CompanionPeer.Endpoint, sel.CompanionPeer.DeviceName))
+                    {
+                        CompanionSyncService.Instance.CurrentPeer = null;
+                        DeviceComboBox.SelectedIndex = -1;
+                        DisconnectDeviceButton.IsEnabled = false;
+                        DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+                    }
+                });
+            };
+
+            LocalSendService.Instance.IncomingTransferRequested += OnIncomingTransferRequested;
+            CompanionSyncService.Instance.IncomingTransferRequested += OnIncomingTransferRequested;
+            CompanionSyncService.Instance.ConfirmFirstTimeDeviceAsync = ConfirmFirstTimeSyncDroidDeviceOnUiAsync;
 
             AdbSyncService.Instance.UnauthorizedDeviceDetected += OnUnauthorizedDeviceDetected;
             AdbSyncService.Instance.TrackedDevicesChanged += OnTrackedDevicesChanged;
 
             _ = RefreshDeviceStatusAsync();
+        }
+
+        private void OnIncomingTransferRequested(IncomingTransferSessionEventArgs args)
+        {
+            _dispatcherQueue?.TryEnqueue(async () =>
+            {
+                ShowReceivePage();
+
+                if (ReceiveFrame.Content is ReceivePage receivePage)
+                {
+                    receivePage.HandleIncomingSessionOnUi(args);
+                }
+
+                if (args.RequiresConfirmation && args.ConfirmationTcs != null)
+                {
+                    await ShowLocalSendReceiveConfirmDialogAsync(args);
+                }
+            });
+        }
+
+        private async Task ShowLocalSendReceiveConfirmDialogAsync(IncomingTransferSessionEventArgs args)
+        {
+            if (args.ConfirmationTcs == null || args.ConfirmationTcs.Task.IsCompleted)
+            {
+                return;
+            }
+
+            for (int i = 0; i < 15 && this.XamlRoot == null; i++)
+            {
+                await Task.Delay(100);
+            }
+
+            if (this.XamlRoot == null || args.ConfirmationTcs.Task.IsCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                var previewLines = args.Files
+                    .Take(12)
+                    .Select(f => $"• {f.FileName} ({f.SizeDisplay})")
+                    .ToList();
+                if (args.Files.Count > 12)
+                {
+                    previewLines.Add($"... (+{args.Files.Count - 12} more)");
+                }
+                string filePreviewText = string.Join("\n", previewLines);
+
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = this.XamlRoot,
+                    Title = Loc.FirstTimeLocalSendReceiveTitle,
+                    Content = new ScrollViewer
+                    {
+                        MaxHeight = 360,
+                        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                        Content = new TextBlock
+                        {
+                            Text = string.Format(
+                                Loc.FirstTimeLocalSendReceiveMessage,
+                                args.SenderName,
+                                args.SenderIp,
+                                args.Files.Count,
+                                filePreviewText),
+                            TextWrapping = TextWrapping.Wrap,
+                            MaxWidth = 480
+                        }
+                    },
+                    PrimaryButtonText = Loc.ConfirmAcceptButton,
+                    CloseButtonText = Loc.ConfirmRejectButton,
+                    DefaultButton = ContentDialogButton.Primary
+                };
+
+                _activeIncomingConfirmDialog = dialog;
+                var result = await dialog.ShowAsync();
+                if (!args.ConfirmationTcs.Task.IsCompleted)
+                {
+                    bool accepted = result == ContentDialogResult.Primary;
+                    (ReceiveFrame.Content as ReceivePage)?.SyncConfirmationDecision(accepted);
+                    args.ConfirmationTcs.TrySetResult(accepted);
+                }
+            }
+            catch
+            {
+                // If another ContentDialog is open, the user can still confirm using the banner on ReceivePage
+            }
+            finally
+            {
+                _activeIncomingConfirmDialog = null;
+            }
+        }
+
+        private Task<bool> ConfirmFirstTimeSyncDroidDeviceOnUiAsync(string deviceName, string ipOrEndpoint)
+        {
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (_dispatcherQueue == null)
+            {
+                tcs.TrySetResult(true);
+                return tcs.Task;
+            }
+
+            _dispatcherQueue.TryEnqueue(async () =>
+            {
+                for (int i = 0; i < 15 && this.XamlRoot == null; i++)
+                {
+                    await Task.Delay(100);
+                }
+
+                if (this.XamlRoot == null)
+                {
+                    tcs.TrySetResult(true);
+                    return;
+                }
+
+                try
+                {
+                    var dialog = new ContentDialog
+                    {
+                        XamlRoot = this.XamlRoot,
+                        Title = Loc.FirstTimeConnectDialogTitle,
+                        Content = new TextBlock
+                        {
+                            Text = string.Format(Loc.FirstTimeSyncDroidConnectMessage, deviceName, ipOrEndpoint),
+                            TextWrapping = TextWrapping.Wrap,
+                            MaxWidth = 460
+                        },
+                        PrimaryButtonText = Loc.ConfirmAcceptButton,
+                        CloseButtonText = Loc.ConfirmRejectButton,
+                        DefaultButton = ContentDialogButton.Primary
+                    };
+
+                    var result = await dialog.ShowAsync();
+                    tcs.TrySetResult(result == ContentDialogResult.Primary);
+                }
+                catch
+                {
+                    tcs.TrySetResult(false);
+                }
+            });
+
+            return tcs.Task;
         }
 
         private void OnUnauthorizedDeviceDetected(string serial)
@@ -163,23 +341,46 @@ namespace SyncDroidWinUI.Views
 
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            if (SettingsView.Visibility == Visibility.Visible)
+            if (SettingsView.Visibility == Visibility.Visible || ManageDevicesView.Visibility == Visibility.Visible)
             {
                 ShowSyncTabs();
             }
             else
             {
-                SettingsView.LoadSettingsToUi();
-                MainTabView.Visibility = Visibility.Collapsed;
-                SettingsView.Visibility = Visibility.Visible;
+                ShowSettingsPage();
             }
+        }
+
+        private void ShowSettingsPage()
+        {
+            SettingsView.LoadSettingsToUi();
+            MainTabView.Visibility = Visibility.Collapsed;
+            ManageDevicesView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Visible;
+        }
+
+        private void ShowManageDevicesPage()
+        {
+            ManageDevicesView.LoadDevicesToUi();
+            MainTabView.Visibility = Visibility.Collapsed;
+            SettingsView.Visibility = Visibility.Collapsed;
+            ManageDevicesView.Visibility = Visibility.Visible;
+        }
+
+        private void ShowReceivePage()
+        {
+            SettingsView.Visibility = Visibility.Collapsed;
+            ManageDevicesView.Visibility = Visibility.Collapsed;
+            MainTabView.Visibility = Visibility.Visible;
+            MainTabView.SelectedItem = ReceiveTabItem;
         }
 
         private void ShowSyncTabs()
         {
             SettingsView.Visibility = Visibility.Collapsed;
+            ManageDevicesView.Visibility = Visibility.Collapsed;
             MainTabView.Visibility = Visibility.Visible;
-            _ = RefreshDeviceStatusAsync();
+            _ = RefreshDeviceStatusAsync(allowAutoSelectUntrusted: false);
         }
 
         private async void RefreshAdb_Click(object sender, RoutedEventArgs e)
@@ -188,7 +389,7 @@ namespace SyncDroidWinUI.Views
             await RefreshDeviceStatusAsync();
         }
 
-        private async Task RefreshDeviceStatusAsync(string? preferredSelectId = null)
+        private async Task RefreshDeviceStatusAsync(string? preferredSelectId = null, bool allowAutoSelectUntrusted = true)
         {
             if (_isRefreshingDevices) return;
             _isRefreshingDevices = true;
@@ -254,16 +455,38 @@ namespace SyncDroidWinUI.Views
                 {
                     DeviceComboBox.ItemsSource = items;
 
-                    int targetIndex = 0;
+                    int targetIndex = -1;
                     if (!string.IsNullOrEmpty(previousSelectedId))
                     {
                         int foundIdx = items.FindIndex(i => string.Equals(i.Id, previousSelectedId, StringComparison.OrdinalIgnoreCase));
                         if (foundIdx >= 0) targetIndex = foundIdx;
                     }
 
+                    if (targetIndex < 0)
+                    {
+                        if (allowAutoSelectUntrusted)
+                        {
+                            targetIndex = 0;
+                        }
+                        else
+                        {
+                            targetIndex = items.FindIndex(i =>
+                                i.Mode != ConnectionMode.WirelessCompanion ||
+                                (i.CompanionPeer != null && SettingsService.IsDeviceTrusted("SyncDroid", null, i.CompanionPeer.Endpoint, i.CompanionPeer.DeviceName)));
+                        }
+                    }
+
                     DeviceComboBox.SelectedIndex = targetIndex;
-                    DisconnectDeviceButton.IsEnabled = true;
-                    DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.MediumSeaGreen);
+                    if (targetIndex >= 0)
+                    {
+                        DisconnectDeviceButton.IsEnabled = true;
+                        DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.MediumSeaGreen);
+                    }
+                    else
+                    {
+                        DisconnectDeviceButton.IsEnabled = false;
+                        DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+                    }
                 }
                 else
                 {
@@ -333,13 +556,26 @@ namespace SyncDroidWinUI.Views
             DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
         }
 
-        private void DeviceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void DeviceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (DeviceComboBox.SelectedItem is ConnectedDeviceItem selected)
             {
                 DisconnectDeviceButton.IsEnabled = true;
                 if (selected.Mode == ConnectionMode.WirelessCompanion && selected.CompanionPeer != null)
                 {
+                    bool confirmed = await CompanionSyncService.Instance.EnsurePeerAuthenticatedAsync(
+                        selected.CompanionPeer.DeviceName,
+                        selected.CompanionPeer.Endpoint,
+                        notifyRemoteOnSuccess: true);
+                    if (!confirmed)
+                    {
+                        CompanionSyncService.Instance.CurrentPeer = null;
+                        DeviceComboBox.SelectedIndex = -1;
+                        DisconnectDeviceButton.IsEnabled = false;
+                        DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.IndianRed);
+                        return;
+                    }
+
                     CompanionSyncService.Instance.CurrentPeer = selected.CompanionPeer;
                     CompanionSyncService.Instance.ActiveConnectionMode = ConnectionMode.WirelessCompanion;
                     DeviceStatusDot.Fill = new SolidColorBrush(Microsoft.UI.Colors.MediumSeaGreen);
@@ -560,6 +796,15 @@ namespace SyncDroidWinUI.Views
 
                 if (companionPeer != null)
                 {
+                    bool confirmed = await CompanionSyncService.Instance.EnsurePeerAuthenticatedAsync(
+                        companionPeer.DeviceName,
+                        companionPeer.Endpoint,
+                        notifyRemoteOnSuccess: true);
+                    if (!confirmed)
+                    {
+                        return;
+                    }
+
                     var updatedSettings = SettingsService.Load();
                     updatedSettings.LastCompanionIpEndpoint = companionPeer.Endpoint;
                     SettingsService.AddToHistoryList(updatedSettings.CompanionEndpointHistory, companionPeer.Endpoint, ignoreCase: true);

@@ -1,0 +1,361 @@
+<Page
+    x:Class="SyncDroidWinUI.Views.ReceivePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:SyncDroidWinUI.Views"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Background="Transparent">
+
+    <Grid Padding="12,10,12,14" RowSpacing="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="1.35*" MinHeight="200"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="0.9*" MinHeight="120"/>
+        </Grid.RowDefinitions>
+
+        <!-- Card 1: Sender Info, Save Directory & Pending Confirmation Banner -->
+        <Border
+            Grid.Row="0"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="18,12">
+            <StackPanel Spacing="10">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE896;" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.ReceiveSenderLabel, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <TextBlock
+                            x:Name="SenderDeviceText"
+                            Text="{Binding Loc.ReceiveNoActiveSender, Mode=OneWay}"
+                            FontWeight="SemiBold"
+                            VerticalAlignment="Center"
+                            TextTrimming="CharacterEllipsis"/>
+                        <Border
+                            x:Name="ProtocolBadgeBorder"
+                            Visibility="Collapsed"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            CornerRadius="4"
+                            Padding="8,2"
+                            VerticalAlignment="Center">
+                            <TextBlock
+                                x:Name="ProtocolBadgeText"
+                                Text="LocalSend"
+                                FontFamily="Consolas"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                        </Border>
+                    </StackPanel>
+
+                    <Button Grid.Column="2" Click="OpenReceiveFolder_Click" Padding="12,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE8B7;" FontSize="13"/>
+                            <TextBlock Text="{Binding Loc.OpenReceiveFolderButton, Mode=OneWay}" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock
+                        Grid.Column="0"
+                        Text="{Binding Loc.ReceiveSaveDirLabel, Mode=OneWay}"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        VerticalAlignment="Center"/>
+                    <TextBlock
+                        Grid.Column="1"
+                        x:Name="SaveDirText"
+                        FontFamily="Consolas"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        VerticalAlignment="Center"
+                        TextTrimming="CharacterEllipsis"/>
+                </Grid>
+
+                <!-- Pending First-Time Confirmation Banner (LocalSend / SyncDroid) -->
+                <Border
+                    x:Name="PendingConfirmBanner"
+                    Visibility="Collapsed"
+                    Background="{ThemeResource LayerFillColorAltBrush}"
+                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="14,10">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <FontIcon Grid.Column="0" Glyph="&#xE83D;" FontSize="18" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+
+                        <TextBlock
+                            Grid.Column="1"
+                            x:Name="PendingConfirmText"
+                            FontSize="13"
+                            FontWeight="SemiBold"
+                            TextWrapping="Wrap"
+                            VerticalAlignment="Center"/>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Button
+                                Style="{StaticResource AccentButtonStyle}"
+                                Click="AcceptTransfer_Click"
+                                Padding="14,6">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE73E;" FontSize="12"/>
+                                    <TextBlock Text="{Binding Loc.AcceptTransferButton, Mode=OneWay}" FontWeight="SemiBold"/>
+                                </StackPanel>
+                            </Button>
+                            <Button Click="DeclineTransfer_Click" Padding="14,6">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE711;" FontSize="12"/>
+                                    <TextBlock Text="{Binding Loc.DeclineTransferButton, Mode=OneWay}"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- Card 2: Incoming Files List (File Names / 文件档名) -->
+        <Border
+            Grid.Row="1"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="18,12">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE8A5;" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.ReceiveFilesHeader, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                            <TextBlock x:Name="ReceiveFileCountText" Text="0" FontFamily="Consolas" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        </Border>
+                    </StackPanel>
+
+                    <Button Grid.Column="1" Click="ClearReceiveList_Click" Padding="10,5">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                            <TextBlock Text="{Binding Loc.ClearReceiveListButton, Mode=OneWay}" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <Border
+                    Grid.Row="1"
+                    Background="{ThemeResource LayerFillColorAltBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="4">
+                    <Grid>
+                        <StackPanel
+                            x:Name="EmptyReceiveHintPanel"
+                            Spacing="6"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Padding="24,0"
+                            IsHitTestVisible="False">
+                            <FontIcon Glyph="&#xE896;" FontSize="24" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center"/>
+                            <TextBlock
+                                Text="{Binding Loc.ReceiveEmptyFilesHint, Mode=OneWay}"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                HorizontalAlignment="Center"
+                                TextAlignment="Center"
+                                TextWrapping="Wrap"/>
+                        </StackPanel>
+
+                        <ListView
+                            x:Name="ReceivedFilesListView"
+                            ItemsSource="{Binding ReceivedFiles, Mode=OneWay}"
+                            SelectionMode="None">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="MinHeight" Value="34"/>
+                                    <Setter Property="Padding" Value="10,4"/>
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="2*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <FontIcon Grid.Column="0" Glyph="&#xE8A5;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+
+                                        <Border Grid.Column="1" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="6,1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Protocol}" FontFamily="Consolas" FontSize="10" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        </Border>
+
+                                        <StackPanel Grid.Column="2" Spacing="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding SavedPath}" FontFamily="Consolas" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+
+                                        <TextBlock Grid.Column="3" Text="{Binding SizeDisplay}" FontFamily="Consolas" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+
+                                        <Border Grid.Column="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,2" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding StatusText, Mode=OneWay}" FontSize="11" FontWeight="SemiBold"/>
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Card 3: Receive Progress Bar -->
+        <Border
+            Grid.Row="2"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="18,10">
+            <StackPanel Spacing="8">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock
+                        Grid.Column="0"
+                        x:Name="ReceiveStatusText"
+                        Text="{Binding Loc.StatusReady, Mode=OneWay}"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+
+                    <Border
+                        Grid.Column="1"
+                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                        CornerRadius="4"
+                        Padding="8,3"
+                        VerticalAlignment="Center">
+                        <TextBlock
+                            x:Name="ReceiveProgressText"
+                            Text="0%"
+                            FontFamily="Consolas"
+                            FontSize="12"
+                            FontWeight="SemiBold"/>
+                    </Border>
+                </Grid>
+
+                <ProgressBar x:Name="ReceiveProgressBar" Value="0" Maximum="100" MinHeight="6"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Card 4: Activity Logs -->
+        <Border
+            Grid.Row="3"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="16,10">
+            <Grid RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding Loc.ActivityLogsHeader, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                        <Button Click="ClearLogs_Click" Padding="10,4">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.ClearLogsButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Click="CopyLogs_Click" Padding="10,4">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE8C8;" FontSize="12"/>
+                                <TextBlock Text="{Binding Loc.CopyLogsButton, Mode=OneWay}" FontSize="12"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <Border
+                    Grid.Row="1"
+                    Background="{ThemeResource LayerFillColorAltBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="4">
+                    <ListView
+                        x:Name="ReceiveLogListView"
+                        ItemsSource="{Binding Logs, Mode=OneWay}"
+                        SelectionMode="None">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="MinHeight" Value="24"/>
+                                <Setter Property="Padding" Value="8,2"/>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="12" IsTextSelectionEnabled="True"/>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Page>

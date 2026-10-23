@@ -90,7 +90,7 @@ jobs:
           }
 
           if (-not [string]::IsNullOrWhiteSpace($tag)) {
-            $normalized = $tag -replace '^[vV]', ''
+            $normalized = ($tag -replace '^[vV]', '') -replace '-[a-zA-Z0-9._-]+$', ''
             if ($normalized -match '^\d+\.\d+\.\d+$') {
               $normalized = "$normalized.0"
             }

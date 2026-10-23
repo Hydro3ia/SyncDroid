@@ -15,6 +15,7 @@ namespace SyncDroidWinUI.Views
 
         public event EventHandler? BackRequested;
         public event EventHandler? AdbConfigChanged;
+        public event EventHandler? ManageDevicesRequested;
 
         private bool _isInitializing = true;
 
@@ -390,6 +391,11 @@ namespace SyncDroidWinUI.Views
         private void BackButton_Click(object sender, RoutedEventArgs e)
         {
             BackRequested?.Invoke(this, EventArgs.Empty);
+        }
+
+        private void ManageDevices_Click(object sender, RoutedEventArgs e)
+        {
+            ManageDevicesRequested?.Invoke(this, EventArgs.Empty);
         }
     }
 }

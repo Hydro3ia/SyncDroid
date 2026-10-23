@@ -126,10 +126,20 @@
                     </TabViewItem.IconSource>
                     <Frame x:Name="DirectTransferFrame"/>
                 </TabViewItem>
+
+                <TabViewItem x:Name="ReceiveTabItem" Header="{Binding Loc.TabReceive, Mode=OneWay}" IsClosable="False">
+                    <TabViewItem.IconSource>
+                        <FontIconSource Glyph="&#xE896;"/>
+                    </TabViewItem.IconSource>
+                    <Frame x:Name="ReceiveFrame"/>
+                </TabViewItem>
             </TabView.TabItems>
         </TabView>
 
         <!-- Embedded Settings Page -->
         <local:SettingsPage x:Name="SettingsView" Grid.Row="1" Visibility="Collapsed"/>
+
+        <!-- Embedded Manage Authenticated Devices Page -->
+        <local:ManageDevicesPage x:Name="ManageDevicesView" Grid.Row="1" Visibility="Collapsed"/>
     </Grid>
 </Page>

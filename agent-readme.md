@@ -8,7 +8,7 @@ This document provides complete context for AI coding agents and developers cont
 - **Project Path**: `C:\Users\Yiren\devext\PRTS\SyncDroidWinUI`
 - **Target Framework**: `.NET 10.0` (`net10.0-windows10.0.26100.0`)
 - **UI Framework**: **WinUI 3** (Windows App SDK 2.x, Mica backdrop, Windows 11 card-based layout)
-- **Current Version**: `0.1.5.0 Release` (Manifest version: `0.1.5.0`)
+- **Current Version**: `0.2.0.0 beta` (Manifest version: `0.2.0.0`)
 - **Core Purpose**: Mirror-synchronize folders (`/MIR` Mirror Sync & Incremental Merge) and transfer files/folders between a Windows PC and any target device (Android or Windows PC) over **USB ADB**, **Wireless Companion (LAN / Wi-Fi)**, or **LocalSend (Protocol v2.1)**:
   1. **Tab 1 (`Push (/MIR mode)`)**: Push sync (copies new/modified files to target, skips identical files without touching them, deletes extra files on target in `/MIR` mode or keeps them in Incremental Merge mode).
   2. **Tab 2 (`Pull (/MIR mode)`)**: Pull sync (pulls new/modified files from target to PC, skips identical files without touching them, deletes extra files on PC in `/MIR` mode or keeps them in Incremental Merge mode).

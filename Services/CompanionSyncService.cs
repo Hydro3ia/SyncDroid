@@ -21,7 +21,7 @@ namespace SyncDroidWinUI.Services
     {
         public const int UdpDiscoveryPort = 45820;
         public const int DefaultTcpPort = 45821;
-        public const string AppVersion = "0.1.5.0";
+        public const string AppVersion = "0.2.0.0";
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -67,12 +67,17 @@ namespace SyncDroidWinUI.Services
         public string? LastServerError { get; private set; }
 
         public event Action<string>? ServerActivityLogged;
+        public event Action<IncomingTransferSessionEventArgs>? IncomingTransferRequested;
+        public event Action<string, string, double, string>? IncomingFileProgressUpdated;
+        public event Action<string, string, string, bool, bool>? IncomingFileCompleted;
+        public Func<string, string, Task<bool>>? ConfirmFirstTimeDeviceAsync { get; set; }
 
         private readonly HttpClient _httpClient;
         private readonly HttpClient _probeHttpClient;
         private readonly Dictionary<string, List<string>> _directoryCache = new();
         private readonly object _cacheLock = new();
         private readonly ConcurrentDictionary<string, CompanionPeer> _discoveredPeers = new(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, Task<bool>> _pendingAuthByIp = new(StringComparer.OrdinalIgnoreCase);
 
         private CancellationTokenSource? _serverCts;
         private TcpListener? _tcpListener;
@@ -84,12 +89,92 @@ namespace SyncDroidWinUI.Services
             {
                 Timeout = TimeSpan.FromMinutes(30)
             };
+            _httpClient.DefaultRequestHeaders.TryAddWithoutValidation("X-SyncDroid-DeviceName", Environment.MachineName);
+
             _probeHttpClient = new HttpClient
             {
                 Timeout = TimeSpan.FromMilliseconds(2200)
             };
+            _probeHttpClient.DefaultRequestHeaders.TryAddWithoutValidation("X-SyncDroid-DeviceName", Environment.MachineName);
 
             StartOrRestartServerFromSettings();
+        }
+
+        private string ResolvePeerName(string hostIp, string? providedName)
+        {
+            if (!string.IsNullOrWhiteSpace(providedName))
+            {
+                return providedName.Trim();
+            }
+
+            var discovered = _discoveredPeers.Values.FirstOrDefault(p =>
+                string.Equals(p.IpAddress, hostIp, StringComparison.OrdinalIgnoreCase));
+            if (discovered != null && !string.IsNullOrWhiteSpace(discovered.DeviceName))
+            {
+                return discovered.DeviceName;
+            }
+
+            if (_currentPeer != null &&
+                string.Equals(_currentPeer.IpAddress, hostIp, StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(_currentPeer.DeviceName))
+            {
+                return _currentPeer.DeviceName;
+            }
+
+            return hostIp;
+        }
+
+        public async Task<bool> EnsurePeerAuthenticatedAsync(
+            string deviceName,
+            string ipOrEndpoint,
+            bool notifyRemoteOnSuccess = false,
+            CancellationToken ct = default)
+        {
+            if (string.IsNullOrWhiteSpace(ipOrEndpoint)) return false;
+            string hostIp = SettingsService.NormalizeHostIp(ipOrEndpoint);
+            if (string.IsNullOrWhiteSpace(hostIp)) return false;
+
+            string resolvedName = ResolvePeerName(hostIp, deviceName);
+            if (SettingsService.IsDeviceTrusted("SyncDroid", null, ipOrEndpoint, resolvedName))
+            {
+                return true;
+            }
+
+            var confirmFunc = ConfirmFirstTimeDeviceAsync;
+            if (confirmFunc == null)
+            {
+                return true;
+            }
+
+            var pendingTask = _pendingAuthByIp.GetOrAdd(hostIp, key => Task.Run(async () =>
+            {
+                try
+                {
+                    bool confirmed = await confirmFunc(resolvedName, ipOrEndpoint);
+                    if (confirmed)
+                    {
+                        SettingsService.AddTrustedDevice("SyncDroid", resolvedName, ipOrEndpoint);
+                        if (notifyRemoteOnSuccess)
+                        {
+                            try
+                            {
+                                string targetEp = ipOrEndpoint.Contains(':') ? ipOrEndpoint : $"{hostIp}:{DefaultTcpPort}";
+                                string connectUrl = $"http://{targetEp}/api/v1/connect?deviceName={Uri.EscapeDataString(Environment.MachineName)}&port={CurrentListeningPort}";
+                                using var emptyContent = new ByteArrayContent(Array.Empty<byte>());
+                                await _probeHttpClient.PostAsync(connectUrl, emptyContent, ct);
+                            }
+                            catch { }
+                        }
+                    }
+                    return confirmed;
+                }
+                finally
+                {
+                    _pendingAuthByIp.TryRemove(key, out _);
+                }
+            }));
+
+            return await pendingTask;
         }
 
         private void LogServerActivity(string message)
@@ -370,6 +455,9 @@ namespace SyncDroidWinUI.Services
                                  teStr.Contains("chunked", StringComparison.OrdinalIgnoreCase);
 
                 using var combinedBodyStream = new PreBufferedNetworkStream(leftoverBytes, netStream);
+                string remoteIp = (client.Client.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "";
+                string? headerDevName = headers.TryGetValue("X-SyncDroid-DeviceName", out var hdn) ? hdn : null;
+                string peerName = ResolvePeerName(remoteIp, query.TryGetValue("deviceName", out var qdn) ? qdn : headerDevName);
 
                 try
                 {
@@ -378,106 +466,132 @@ namespace SyncDroidWinUI.Services
                         var info = BuildLocalCompanionInfo();
                         await WriteJsonResponseAsync(netStream, 200, "OK", info, ct);
                     }
-                    else if (method == "GET" && string.Equals(routePath, "/api/v1/storage/list", StringComparison.OrdinalIgnoreCase))
+                    else if (method == "POST" && string.Equals(routePath, "/api/v1/connect", StringComparison.OrdinalIgnoreCase))
                     {
-                        string path = query.TryGetValue("path", out var p) ? p : "";
-                        bool includeFiles = query.TryGetValue("includeFiles", out var inc) &&
-                                            string.Equals(inc, "true", StringComparison.OrdinalIgnoreCase);
-                        var listing = BuildLocalDirectoryListing(path, includeFiles);
-                        await WriteJsonResponseAsync(netStream, 200, "OK", listing, ct);
-                    }
-                    else if (method == "GET" && string.Equals(routePath, "/api/v1/storage/tree", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string path = query.TryGetValue("path", out var p) ? p : "";
-                        var manifest = BuildLocalTreeManifest(path);
-                        LogServerActivity($"Scanned PC directory tree: {path} ({manifest.Files.Count} files)");
-                        await WriteJsonResponseAsync(netStream, 200, "OK", manifest, ct);
-                    }
-                    else if (method == "POST" && string.Equals(routePath, "/api/v1/storage/mkdir", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
-                        if (string.IsNullOrWhiteSpace(path))
+                        int peerPort = query.TryGetValue("port", out var qp) && int.TryParse(qp, out int parsedPort) ? parsedPort : DefaultTcpPort;
+                        string ep = !string.IsNullOrWhiteSpace(remoteIp) ? $"{remoteIp}:{peerPort}" : remoteIp;
+                        bool allowed = await EnsurePeerAuthenticatedAsync(peerName, ep, notifyRemoteOnSuccess: false, ct);
+                        if (!allowed)
                         {
-                            await WriteJsonResponseAsync(netStream, 400, "Bad Request", new { error = "Path is required" }, ct);
+                            await WriteJsonResponseAsync(netStream, 403, "Forbidden", new { error = "Connection declined by user" }, ct);
                             return;
-                        }
-                        Directory.CreateDirectory(path);
-                        LogServerActivity($"Created folder: {path}");
-                        await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true, path }, ct);
-                    }
-                    else if (method == "GET" && string.Equals(routePath, "/api/v1/file/hash", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
-                        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-                        {
-                            await WriteJsonResponseAsync(netStream, 404, "Not Found", new { error = "File not found" }, ct);
-                            return;
-                        }
-
-                        var fi = new FileInfo(path);
-                        string sha256 = await FileHashHelper.ComputeFileSha256Async(path, ct);
-                        await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true, sha256, size = fi.Length }, ct);
-                    }
-                    else if (method == "GET" && string.Equals(routePath, "/api/v1/file/pull", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
-                        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-                        {
-                            await WriteJsonResponseAsync(netStream, 404, "Not Found", new { error = "File not found" }, ct);
-                            return;
-                        }
-
-                        var fileInfo = new FileInfo(path);
-                        string sha256 = SettingsService.Load().VerifyHashAfterTransfer
-                            ? await FileHashHelper.ComputeFileSha256Async(path, ct)
-                            : "";
-                        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, useAsync: true);
-                        string responseHeader =
-                            "HTTP/1.1 200 OK\r\n" +
-                            "Content-Type: application/octet-stream\r\n" +
-                            $"Content-Length: {fs.Length}\r\n" +
-                            $"X-LastWriteTimeUtcTicks: {fileInfo.LastWriteTimeUtc.Ticks}\r\n" +
-                            (!string.IsNullOrEmpty(sha256) ? $"X-File-Sha256: {sha256}\r\n" : "") +
-                            "Connection: close\r\n\r\n";
-                        byte[] respHeaderBytes = Encoding.ASCII.GetBytes(responseHeader);
-                        await netStream.WriteAsync(respHeaderBytes, 0, respHeaderBytes.Length, ct);
-                        await fs.CopyToAsync(netStream, 65536, ct);
-                        await netStream.FlushAsync(ct);
-                        LogServerActivity($"Sent file to Android: {path}");
-                    }
-                    else if (method == "POST" && string.Equals(routePath, "/api/v1/file/push", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string rawPath = query.TryGetValue("path", out var p) ? p : "";
-                        long mtimeTicks = query.TryGetValue("mtimeTicks", out var mt) && long.TryParse(mt, out long parsedMt) ? parsedMt : 0;
-                        int conflictInt = query.TryGetValue("conflict", out var cf) && int.TryParse(cf, out int parsedCf) ? parsedCf : 1;
-                        string? expectedSha256 = query.TryGetValue("sha256", out var qSha) && !string.IsNullOrWhiteSpace(qSha)
-                            ? qSha.Trim()
-                            : (headers.TryGetValue("X-File-Sha256", out var hSha) ? hSha.Trim() : null);
-                        var conflict = Enum.IsDefined(typeof(ConflictPolicy), conflictInt)
-                            ? (ConflictPolicy)conflictInt
-                            : ConflictPolicy.Overwrite;
-
-                        await HandleServerFilePushAsync(netStream, combinedBodyStream, rawPath, mtimeTicks, conflict, contentLength, isChunked, expectedSha256, ct);
-                    }
-                    else if (method == "POST" && string.Equals(routePath, "/api/v1/file/delete", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
-                        if (string.IsNullOrWhiteSpace(path) || IsProtectedRootPath(path))
-                        {
-                            await WriteJsonResponseAsync(netStream, 400, "Bad Request", new { error = "Cannot delete root or empty path" }, ct);
-                            return;
-                        }
-
-                        if (File.Exists(path))
-                        {
-                            File.Delete(path);
-                            LogServerActivity($"Deleted file: {path}");
                         }
                         await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true }, ct);
                     }
                     else
                     {
-                        await WriteJsonResponseAsync(netStream, 404, "Not Found", new { error = "Endpoint not found" }, ct);
+                        if (!string.IsNullOrWhiteSpace(remoteIp) && !FileHashHelper.IsLoopbackOrDisallowedEndpoint(remoteIp))
+                        {
+                            bool allowed = await EnsurePeerAuthenticatedAsync(peerName, remoteIp, notifyRemoteOnSuccess: false, ct);
+                            if (!allowed)
+                            {
+                                await DrainBodyStreamAsync(combinedBodyStream, contentLength, isChunked, ct);
+                                await WriteJsonResponseAsync(netStream, 403, "Forbidden", new { error = "Device authentication declined by user" }, ct);
+                                return;
+                            }
+                        }
+
+                        if (method == "GET" && string.Equals(routePath, "/api/v1/storage/list", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string path = query.TryGetValue("path", out var p) ? p : "";
+                            bool includeFiles = query.TryGetValue("includeFiles", out var inc) &&
+                                                string.Equals(inc, "true", StringComparison.OrdinalIgnoreCase);
+                            var listing = BuildLocalDirectoryListing(path, includeFiles);
+                            await WriteJsonResponseAsync(netStream, 200, "OK", listing, ct);
+                        }
+                        else if (method == "GET" && string.Equals(routePath, "/api/v1/storage/tree", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string path = query.TryGetValue("path", out var p) ? p : "";
+                            var manifest = BuildLocalTreeManifest(path);
+                            LogServerActivity($"Scanned PC directory tree: {path} ({manifest.Files.Count} files)");
+                            await WriteJsonResponseAsync(netStream, 200, "OK", manifest, ct);
+                        }
+                        else if (method == "POST" && string.Equals(routePath, "/api/v1/storage/mkdir", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
+                            if (string.IsNullOrWhiteSpace(path))
+                            {
+                                await WriteJsonResponseAsync(netStream, 400, "Bad Request", new { error = "Path is required" }, ct);
+                                return;
+                            }
+                            Directory.CreateDirectory(path);
+                            LogServerActivity($"Created folder: {path}");
+                            await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true, path }, ct);
+                        }
+                        else if (method == "GET" && string.Equals(routePath, "/api/v1/file/hash", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
+                            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                            {
+                                await WriteJsonResponseAsync(netStream, 404, "Not Found", new { error = "File not found" }, ct);
+                                return;
+                            }
+
+                            var fi = new FileInfo(path);
+                            string sha256 = await FileHashHelper.ComputeFileSha256Async(path, ct);
+                            await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true, sha256, size = fi.Length }, ct);
+                        }
+                        else if (method == "GET" && string.Equals(routePath, "/api/v1/file/pull", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
+                            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                            {
+                                await WriteJsonResponseAsync(netStream, 404, "Not Found", new { error = "File not found" }, ct);
+                                return;
+                            }
+
+                            var fileInfo = new FileInfo(path);
+                            string sha256 = SettingsService.Load().VerifyHashAfterTransfer
+                                ? await FileHashHelper.ComputeFileSha256Async(path, ct)
+                                : "";
+                            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536, useAsync: true);
+                            string responseHeader =
+                                "HTTP/1.1 200 OK\r\n" +
+                                "Content-Type: application/octet-stream\r\n" +
+                                $"Content-Length: {fs.Length}\r\n" +
+                                $"X-LastWriteTimeUtcTicks: {fileInfo.LastWriteTimeUtc.Ticks}\r\n" +
+                                (!string.IsNullOrEmpty(sha256) ? $"X-File-Sha256: {sha256}\r\n" : "") +
+                                "Connection: close\r\n\r\n";
+                            byte[] respHeaderBytes = Encoding.ASCII.GetBytes(responseHeader);
+                            await netStream.WriteAsync(respHeaderBytes, 0, respHeaderBytes.Length, ct);
+                            await fs.CopyToAsync(netStream, 65536, ct);
+                            await netStream.FlushAsync(ct);
+                            LogServerActivity($"Sent file to device: {path}");
+                        }
+                        else if (method == "POST" && string.Equals(routePath, "/api/v1/file/push", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string rawPath = query.TryGetValue("path", out var p) ? p : "";
+                            long mtimeTicks = query.TryGetValue("mtimeTicks", out var mt) && long.TryParse(mt, out long parsedMt) ? parsedMt : 0;
+                            int conflictInt = query.TryGetValue("conflict", out var cf) && int.TryParse(cf, out int parsedCf) ? parsedCf : 1;
+                            string? expectedSha256 = query.TryGetValue("sha256", out var qSha) && !string.IsNullOrWhiteSpace(qSha)
+                                ? qSha.Trim()
+                                : (headers.TryGetValue("X-File-Sha256", out var hSha) ? hSha.Trim() : null);
+                            var conflict = Enum.IsDefined(typeof(ConflictPolicy), conflictInt)
+                                ? (ConflictPolicy)conflictInt
+                                : ConflictPolicy.Overwrite;
+
+                            await HandleServerFilePushAsync(netStream, combinedBodyStream, rawPath, mtimeTicks, conflict, contentLength, isChunked, expectedSha256, remoteIp, peerName, ct);
+                        }
+                        else if (method == "POST" && string.Equals(routePath, "/api/v1/file/delete", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string path = NormalizeWindowsLocalPath(query.TryGetValue("path", out var p) ? p : "");
+                            if (string.IsNullOrWhiteSpace(path) || IsProtectedRootPath(path))
+                            {
+                                await WriteJsonResponseAsync(netStream, 400, "Bad Request", new { error = "Cannot delete root or empty path" }, ct);
+                                return;
+                            }
+
+                            if (File.Exists(path))
+                            {
+                                File.Delete(path);
+                                LogServerActivity($"Deleted file: {path}");
+                            }
+                            await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true }, ct);
+                        }
+                        else
+                        {
+                            await WriteJsonResponseAsync(netStream, 404, "Not Found", new { error = "Endpoint not found" }, ct);
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -501,6 +615,8 @@ namespace SyncDroidWinUI.Services
             long contentLength,
             bool isChunked,
             string? expectedSha256,
+            string remoteIp,
+            string peerName,
             CancellationToken ct)
         {
             string normalizedTarget = SanitizeWindowsFullPath(NormalizeWindowsLocalPath(rawPath));
@@ -514,6 +630,37 @@ namespace SyncDroidWinUI.Services
             Directory.CreateDirectory(parentDir);
 
             string finalTarget = normalizedTarget;
+            string fileId = Guid.NewGuid().ToString("N");
+            string sessionId = $"syncdroid_{remoteIp}";
+            string displayFileName = Path.GetFileName(finalTarget);
+            if (string.IsNullOrWhiteSpace(displayFileName)) displayFileName = rawPath;
+            var loc = LocalizationService.Instance;
+
+            var fileItem = new ReceivedFileItem
+            {
+                Id = fileId,
+                FileName = displayFileName,
+                SenderName = peerName,
+                Protocol = "SyncDroid",
+                Size = contentLength > 0 ? contentLength : 0,
+                SizeDisplay = contentLength >= 0 ? FileHashHelper.FormatByteSize(contentLength) : "",
+                SavedPath = finalTarget,
+                StatusText = loc.ReceiveStatusReceiving,
+                ProgressPercent = 0
+            };
+
+            IncomingTransferRequested?.Invoke(new IncomingTransferSessionEventArgs
+            {
+                SessionId = sessionId,
+                SenderName = peerName,
+                SenderIp = remoteIp,
+                Protocol = "SyncDroid",
+                SaveDirectory = parentDir,
+                RequiresConfirmation = false,
+                AppendToExistingSession = true,
+                Files = new List<ReceivedFileItem> { fileItem }
+            });
+
             if (File.Exists(finalTarget))
             {
                 if (conflict == ConflictPolicy.SkipIdenticalSize && contentLength >= 0)
@@ -523,6 +670,7 @@ namespace SyncDroidWinUI.Services
                     {
                         await DrainBodyStreamAsync(bodyStream, contentLength, isChunked, ct);
                         LogServerActivity($"Skipped (Identical): {finalTarget}");
+                        IncomingFileCompleted?.Invoke(sessionId, fileId, finalTarget, true, false);
                         await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true, skipped = true, path = finalTarget }, ct);
                         return;
                     }
@@ -538,15 +686,23 @@ namespace SyncDroidWinUI.Services
 
             try
             {
-                using (var fs = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
+                using (var rawFs = new FileStream(tempPartPath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, useAsync: true))
+                using (var trackedFs = new ProgressTrackingStream(rawFs, (inFlightBytes, liveSpeed) =>
+                {
+                    double livePct = contentLength > 0
+                        ? FileHashHelper.CalculateOverallPercent(inFlightBytes, contentLength, 0, 1)
+                        : 50.0;
+                    IncomingFileProgressUpdated?.Invoke(sessionId, fileId, livePct, liveSpeed);
+                    LogServerActivity($"Receiving: {displayFileName} | Speed: {liveSpeed} | Overall: {livePct:F1}%");
+                }))
                 {
                     if (isChunked)
                     {
-                        bytesWritten = await CopyChunkedBodyToStreamAsync(bodyStream, fs, ct);
+                        bytesWritten = await CopyChunkedBodyToStreamAsync(bodyStream, trackedFs, ct);
                     }
                     else if (contentLength >= 0)
                     {
-                        bytesWritten = await CopyExactBytesAsync(bodyStream, fs, contentLength, ct);
+                        bytesWritten = await CopyExactBytesAsync(bodyStream, trackedFs, contentLength, ct);
                         if (bytesWritten != contentLength)
                         {
                             throw new IOException($"Incomplete upload stream: expected {contentLength} bytes, got {bytesWritten} bytes.");
@@ -554,8 +710,8 @@ namespace SyncDroidWinUI.Services
                     }
                     else
                     {
-                        await bodyStream.CopyToAsync(fs, 65536, ct);
-                        bytesWritten = fs.Length;
+                        await bodyStream.CopyToAsync(trackedFs, 65536, ct);
+                        bytesWritten = trackedFs.TotalBytesTransferred;
                     }
                 }
 
@@ -566,6 +722,7 @@ namespace SyncDroidWinUI.Services
                     {
                         try { File.Delete(tempPartPath); } catch { }
                         LogServerActivity($"Skipped (Identical): {finalTarget}");
+                        IncomingFileCompleted?.Invoke(sessionId, fileId, finalTarget, true, false);
                         await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true, skipped = true, path = finalTarget }, ct);
                         return;
                     }
@@ -592,11 +749,13 @@ namespace SyncDroidWinUI.Services
                     catch { }
                 }
 
-                LogServerActivity($"Received file from Android: {finalTarget}");
+                IncomingFileCompleted?.Invoke(sessionId, fileId, finalTarget, false, false);
+                LogServerActivity($"Received file from {peerName}: {finalTarget}");
                 await WriteJsonResponseAsync(netStream, 200, "OK", new { ok = true, path = finalTarget, size = bytesWritten }, ct);
             }
             catch
             {
+                IncomingFileCompleted?.Invoke(sessionId, fileId, finalTarget, false, true);
                 try
                 {
                     if (File.Exists(tempPartPath)) File.Delete(tempPartPath);
