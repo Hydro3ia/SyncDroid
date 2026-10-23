@@ -1,0 +1,438 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Create/update a GitHub Release for this build'
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag (e.g. v0.1.5.0). Defaults to v<version>. Only used when publishing.'
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_CLI_UI_LANGUAGE: 'en-US'
+  PROJECT_FILE: 'SyncDroidWinUI.csproj'
+  MANIFEST_FILE: 'Package.appxmanifest'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Resolve the version from Package.appxmanifest, validate the release tag and
+  # prepare the code-signing material shared by all architecture builds.
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Prepare version & signing material
+    runs-on: windows-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      publish: ${{ steps.version.outputs.publish }}
+    env:
+      SIGNING_PFX_BASE64: ${{ secrets.SIGNING_CERT_PFX_BASE64 }}
+      SIGNING_PFX_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+      INPUT_PUBLISH: ${{ inputs.publish }}
+      INPUT_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Resolve version and release tag
+        id: version
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          [xml]$manifest = Get-Content -Raw -LiteralPath $env:MANIFEST_FILE
+          $version = [string]$manifest.Package.Identity.Version
+          $publisher = [string]$manifest.Package.Identity.Publisher
+
+          if ($version -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            throw "Unexpected version '$version' in $($env:MANIFEST_FILE); expected four numeric parts (e.g. 0.1.5.0)."
+          }
+
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tag = $env:GITHUB_REF_NAME
+            $publish = 'true'
+          }
+          else {
+            $publish = if ($env:INPUT_PUBLISH -eq 'true') { 'true' } else { 'false' }
+            $tag = $env:INPUT_TAG
+            if ($publish -eq 'true' -and [string]::IsNullOrWhiteSpace($tag)) {
+              $tag = "v$version"
+            }
+            if ($publish -ne 'true') {
+              $tag = ''
+            }
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($tag)) {
+            $normalized = $tag -replace '^[vV]', ''
+            if ($normalized -match '^\d+\.\d+\.\d+$') {
+              $normalized = "$normalized.0"
+            }
+            if ($normalized -ne $version) {
+              throw "Release tag '$tag' does not match the package version '$version' in $($env:MANIFEST_FILE). Bump the version before tagging."
+            }
+          }
+
+          "version=$version"        >> $env:GITHUB_OUTPUT
+          "tag=$tag"                >> $env:GITHUB_OUTPUT
+          "publish=$publish"        >> $env:GITHUB_OUTPUT
+          "publisher=$publisher"    >> $env:GITHUB_OUTPUT
+
+          Write-Host "Version: $version"
+          Write-Host "Tag: $tag"
+          Write-Host "Publish: $publish"
+          Write-Host "Publisher: $publisher"
+
+      - name: Prepare signing certificate
+        id: signing
+        env:
+          PUBLISHER: ${{ steps.version.outputs.publisher }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signingDir = Join-Path $PWD 'signing'
+          New-Item -ItemType Directory -Path $signingDir -Force | Out-Null
+          $pfxPath = Join-Path $signingDir 'signing.pfx'
+
+          if (-not [string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64)) {
+            if ([string]::IsNullOrEmpty($env:SIGNING_PFX_PASSWORD)) {
+              throw 'Secret SIGNING_CERT_PFX_BASE64 is set but SIGNING_CERT_PASSWORD is missing.'
+            }
+            $bytes = [Convert]::FromBase64String(($env:SIGNING_PFX_BASE64 -replace '\s', ''))
+            [IO.File]::WriteAllBytes($pfxPath, $bytes)
+            $password = $env:SIGNING_PFX_PASSWORD
+            $source = 'secret'
+            Write-Host 'Using the code-signing certificate stored in repository secrets.'
+          }
+          else {
+            # Fallback so the workflow works before secrets are configured.
+            # Users must trust the generated .cer before installing the packages.
+            Write-Warning 'No SIGNING_CERT_PFX_BASE64 secret found. Generating an ephemeral self-signed certificate for this build.'
+            $password = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
+            $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+            $cert = New-SelfSignedCertificate `
+              -Type CodeSigningCert `
+              -Subject $env:PUBLISHER `
+              -CertStoreLocation 'Cert:\CurrentUser\My' `
+              -KeyExportPolicy Exportable `
+              -KeyUsage DigitalSignature `
+              -KeyLength 2048 `
+              -HashAlgorithm SHA256 `
+              -NotAfter (Get-Date).AddYears(10)
+            Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $securePassword | Out-Null
+            $source = 'generated'
+
+            $summaryLines = @(
+              '### Warning: ephemeral signing certificate'
+              ''
+              'No `SIGNING_CERT_PFX_BASE64` / `SIGNING_CERT_PASSWORD` repository secret was found,'
+              'so this run signed the MSIX packages with a freshly generated self-signed certificate.'
+              'Users will have to trust the `SyncDroidWinUI.cer` attached to each release before installing.'
+              'Add both secrets to reuse one stable certificate across releases.'
+              ''
+            )
+            $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+          Set-Content -LiteralPath (Join-Path $signingDir 'password.txt') -Value $password -NoNewline
+
+          # Always publish the public certificate that matches the signing key.
+          $x509 = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $pfxPath,
+            (ConvertTo-SecureString $password -AsPlainText -Force))
+          [IO.File]::WriteAllBytes(
+            (Join-Path $signingDir 'SyncDroidWinUI.cer'),
+            $x509.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+
+          "source=$source" >> $env:GITHUB_OUTPUT
+          Write-Host "Signing certificate source: $source (thumbprint $($x509.Thumbprint))"
+
+      - name: Upload signing material
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing
+          path: signing
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Build x64 and arm64 MSIX packages (self-contained + framework-dependent)
+  # and sign them with the certificate prepared above.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.arch }} MSIX
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: x64
+            rid: win-x64
+          - arch: arm64
+            platform: ARM64
+            rid: win-arm64
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+      PLATFORM: ${{ matrix.platform }}
+      RID: ${{ matrix.rid }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download signing material
+        uses: actions/download-artifact@v4
+        with:
+          name: signing
+          path: signing
+
+      - name: Build, package and sign
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $signingDir = Join-Path $PWD 'signing'
+          $pfx = Join-Path $signingDir 'signing.pfx'
+          $pfxPassword = (Get-Content -Raw -LiteralPath (Join-Path $signingDir 'password.txt')).Trim()
+
+          function Get-SigntoolPath {
+            # Resolved lazily: the Windows SDK BuildTools NuGet package is only
+            # restored once dotnet build has run at least once.
+            if ($script:signtoolPath) { return $script:signtoolPath }
+
+            $candidates = @()
+            $nugetRoot = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.windows.sdk.buildtools'
+            if (Test-Path $nugetRoot) {
+              $candidates += Get-ChildItem -Path $nugetRoot -Recurse -Filter 'signtool.exe' -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' }
+            }
+            $sdkRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+            if (Test-Path $sdkRoot) {
+              $candidates += Get-ChildItem -Path $sdkRoot -Recurse -Filter 'signtool.exe' -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' }
+            }
+
+            $found = $candidates | Select-Object -First 1 -ExpandProperty FullName
+            if (-not $found) {
+              throw 'signtool.exe was not found in the Microsoft.Windows.SDK.BuildTools NuGet package or the Windows SDK.'
+            }
+            $script:signtoolPath = $found
+            return $found
+          }
+
+          $distDir = Join-Path $env:RUNNER_TEMP 'dist'
+          New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+
+          function Build-MsixPackage {
+            param(
+              [Parameter(Mandatory)][string]$Variant,
+              [Parameter(Mandatory)][bool]$SelfContained,
+              [Parameter(Mandatory)][string]$TargetName
+            )
+
+            $pkgDir = Join-Path $env:RUNNER_TEMP "appx-$Variant"
+            Remove-Item $pkgDir -Recurse -Force -ErrorAction SilentlyContinue
+            # SelfContained changes the intermediate output, so start clean for each variant.
+            Remove-Item (Join-Path $PWD 'obj'), (Join-Path $PWD 'bin') -Recurse -Force -ErrorAction SilentlyContinue
+
+            $selfContainedValue = if ($SelfContained) { 'true' } else { 'false' }
+            $buildArgs = @(
+              'build', $env:PROJECT_FILE,
+              '-c', 'Release',
+              '-r', $env:RID,
+              "/p:Platform=$env:PLATFORM",
+              '/p:WindowsPackageType=MSIX',
+              '/p:GenerateAppxPackageOnBuild=true',
+              "/p:SelfContained=$selfContainedValue",
+              "/p:WindowsAppSDKSelfContained=$selfContainedValue",
+              '/p:AppxBundle=Never',
+              '/p:UapAppxPackageBuildMode=SideloadOnly',
+              '/p:AppxSymbolPackageEnabled=false',
+              '/p:AppxPackageSigningEnabled=false',
+              "/p:AppxPackageDir=$pkgDir\"
+            )
+
+            Write-Host "::group::dotnet $($buildArgs -join ' ')"
+            & dotnet @buildArgs
+            $exitCode = $LASTEXITCODE
+            Write-Host '::endgroup::'
+            if ($exitCode -ne 0) {
+              throw "dotnet build failed for the $Variant $env:ARCH package (exit code $exitCode)."
+            }
+
+            $msix = Get-ChildItem -Path $pkgDir -Recurse -File -Filter 'SyncDroidWinUI_*.msix' |
+              Where-Object { $_.Directory.Name -ne 'Dependencies' } |
+              Select-Object -First 1
+            if (-not $msix) {
+              throw "No MSIX package was produced for the $Variant $env:ARCH build."
+            }
+
+            $target = Join-Path $distDir $TargetName
+            Copy-Item -LiteralPath $msix.FullName -Destination $target -Force
+
+            $signtool = Get-SigntoolPath
+            & $signtool sign /fd SHA256 /f $pfx /p $pfxPassword /tr 'http://timestamp.digicert.com' /td SHA256 $target
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning 'Timestamped signing failed (timestamp server unreachable?), retrying without an RFC3161 timestamp.'
+              & $signtool sign /fd SHA256 /f $pfx /p $pfxPassword $target
+              if ($LASTEXITCODE -ne 0) {
+                throw "signtool failed to sign $TargetName."
+              }
+            }
+
+            Write-Host "Signed $TargetName ($([math]::Round((Get-Item $target).Length / 1MB, 2)) MB)"
+          }
+
+          Build-MsixPackage `
+            -Variant 'selfcontained' `
+            -SelfContained $true `
+            -TargetName "SyncDroid_${env:VERSION}_$($env:ARCH)_SelfContained.msix"
+
+          Build-MsixPackage `
+            -Variant 'frameworkdependent' `
+            -SelfContained $false `
+            -TargetName "SyncDroid_${env:VERSION}_$($env:ARCH)_FrameworkDependent.msix"
+
+          "### $($env:ARCH) MSIX packages" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          '' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Get-ChildItem $distDir -File | ForEach-Object {
+            "| ``$($_.Name)`` | $([math]::Round($_.Length / 1MB, 2)) MB |" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Upload MSIX packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dist/*.msix
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Publish every built package to the GitHub Release.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish GitHub Release
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TARGET_SHA: ${{ github.sha }}
+    steps:
+      - name: Download MSIX packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: msix-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download signing certificate
+        uses: actions/download-artifact@v4
+        with:
+          name: signing
+          path: signing
+
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          rm -f signing/password.txt signing/signing.pfx
+          cp signing/SyncDroidWinUI.cer dist/SyncDroidWinUI.cer
+          cd dist
+          sha256sum *.msix > SHA256SUMS.txt
+          printf '@echo off\r\n' > Install-Certificate.bat
+          printf 'echo Installing SyncDroid certificate to LocalMachine\\Root and LocalMachine\\TrustedPeople...\r\n' >> Install-Certificate.bat
+          printf 'certutil -addstore -f "Root" "%%~dp0SyncDroidWinUI.cer"\r\n' >> Install-Certificate.bat
+          printf 'certutil -addstore -f "TrustedPeople" "%%~dp0SyncDroidWinUI.cer"\r\n' >> Install-Certificate.bat
+          printf 'echo.\r\n' >> Install-Certificate.bat
+          printf 'echo Done. You can now double-click any .msix file to install SyncDroid.\r\n' >> Install-Certificate.bat
+          printf 'pause\r\n' >> Install-Certificate.bat
+          ls -l
+
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          ## SyncDroid ${VERSION}
+
+          WinUI 3 desktop app for syncing folders and transferring files between Windows and Android over USB ADB, LAN/Wi-Fi companion or LocalSend.
+
+          ### Downloads
+
+          | Package | Architecture | Description |
+          | --- | --- | --- |
+          | \`SyncDroid_${VERSION}_x64_SelfContained.msix\` | x64 | Self-contained, no extra runtime required (recommended) |
+          | \`SyncDroid_${VERSION}_arm64_SelfContained.msix\` | arm64 | Self-contained, no extra runtime required (recommended) |
+          | \`SyncDroid_${VERSION}_x64_FrameworkDependent.msix\` | x64 | Smaller download, requires the Windows App SDK Runtime |
+          | \`SyncDroid_${VERSION}_arm64_FrameworkDependent.msix\` | arm64 | Smaller download, requires the Windows App SDK Runtime |
+
+          Not sure which one to pick? Use the **SelfContained** package that matches your PC architecture.
+
+          ### Installation
+
+          1. Download and extract \`SyncDroidWinUI.cer\` and \`Install-Certificate.bat\` to the same folder.
+          2. Right-click \`Install-Certificate.bat\` -> **Run as administrator** (installs the self-signed certificate into \`LocalMachine\\Root\` and \`LocalMachine\\TrustedPeople\`).
+          3. Double-click the \`.msix\` package to install it, or run \`Add-AppxPackage -Path .\\SyncDroid_${VERSION}_x64_SelfContained.msix\` in PowerShell.
+
+          > The framework-dependent packages require the [Windows App SDK Runtime](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads) to be installed.
+
+          ### Verification
+
+          \`SHA256SUMS.txt\` contains the SHA-256 hash of every MSIX package.
+
+          **Full changelog**: https://github.com/${GITHUB_REPOSITORY}/commits/${TAG}
+          EOF
+
+      - name: Create or update release
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists, uploading assets with --clobber."
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --title "SyncDroid $VERSION" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+            exit 0
+          fi
+
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo "Tag $TAG already exists, creating the release for it."
+            gh release create "$TAG" dist/* --title "SyncDroid $VERSION" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          else
+            echo "Creating tag $TAG at $TARGET_SHA together with the release."
+            gh release create "$TAG" dist/* --target "$TARGET_SHA" --title "SyncDroid $VERSION" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          fi

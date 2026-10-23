@@ -5,6 +5,16 @@
 - **Current Version**: `0.1.5.0 Release`
 - **Privacy Policy**: [PRIVACY.md](./PRIVACY.md)
 
+## Download & Installation
+
+Prebuilt MSIX packages for **x64** and **arm64** — in both *self-contained* and *framework-dependent* flavours — are published on the [Releases](https://github.com/Hydro3ia/SyncDroid/releases) page.
+
+1. Download `SyncDroidWinUI.cer`, `Install-Certificate.bat` and the `.msix` package matching your PC architecture.
+2. Right-click `Install-Certificate.bat` → **Run as administrator** (trusts the self-signed certificate).
+3. Double-click the `.msix` package to install, or run `Add-AppxPackage -Path .\SyncDroid_<version>_x64_SelfContained.msix` in PowerShell.
+
+> **Self-contained** packages bundle .NET and the Windows App SDK and need no extra runtime. **Framework-dependent** packages are much smaller but require the [Windows App SDK Runtime](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads).
+
 ## Key Features
 - **Dual-Channel Connectivity (USB ADB + Wireless Companion)**:
   - **ADB Mode**: Connect any Android device with USB debugging enabled.
@@ -31,3 +41,14 @@ Requirements:
 ```powershell
 dotnet build -c Release
 ```
+
+## Releasing
+
+Releases are built and published by GitHub Actions (`.github/workflows/build-release.yml`). Bump `Version` / `AssemblyVersion` in `SyncDroidWinUI.csproj` **and** `Identity Version` in `Package.appxmanifest`, commit, then push a matching tag:
+
+```powershell
+git tag v0.1.6.0
+git push origin v0.1.6.0
+```
+
+The workflow builds and signs the x64 and arm64 packages (self-contained + framework-dependent) and attaches them to a GitHub Release. You can also run it manually from the **Actions** tab without publishing a release — the packages are then available as workflow artifacts.

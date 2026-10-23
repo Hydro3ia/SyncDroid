@@ -137,3 +137,33 @@ Copy-Item "$appPkgDir\SyncDroidWinUI_0.1.5.0_x64_Test\SyncDroidWinUI_0.1.5.0_x64
 & $signtool sign /fd SHA256 /f $pfx /p "SyncDroid123" "$dirSc\SyncDroid_0.1.5.0_Release_x64_SelfContained.msix"
 ```
 *(For `arm64`, use `-r win-arm64 /p:Platform=ARM64`; for Framework-Dependent, set `/p:SelfContained=false`.)*
+
+---
+
+## 6. CI/CD — GitHub Actions (`.github/workflows/build-release.yml`)
+
+- **Triggers**
+  - Push a tag matching `v*` (e.g. `v0.1.5.0`) → build **and** publish a GitHub Release.
+  - Manual `workflow_dispatch` → build only; set `publish = true` to also create a release (`tag` defaults to `v<version>`).
+- **Version validation**: the tag (leading `v` removed; three-part tags get `.0` appended) must equal `Package.appxmanifest` → `Identity Version`, otherwise the run fails immediately.
+- **Build matrix** (`x64` / `arm64`, both variants per architecture):
+  - Self-contained: `/p:SelfContained=true /p:WindowsAppSDKSelfContained=true`
+  - Framework-dependent: both set to `false`
+  - `obj`/`bin` are deleted between the two variants, because `SelfContained` changes the intermediate output and reusing it produces stale packages.
+  - `AppxPackageDir` points to `%RUNNER_TEMP%`; `/p:AppxPackageSigningEnabled=false` because signing is done explicitly afterwards.
+- **Signing** (signtool from the `Microsoft.Windows.SDK.BuildTools` NuGet package, RFC3161 timestamp with a no-timestamp fallback):
+  - Preferred: repository secrets `SIGNING_CERT_PFX_BASE64` + `SIGNING_CERT_PASSWORD` (reuse `ReleasePackages\SyncDroidWinUI.pfx` so users do not have to re-trust a certificate):
+    ```powershell
+    [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\Users\Yiren\devext\PRTS\SyncDroidWinUI\ReleasePackages\SyncDroidWinUI.pfx"))
+    ```
+  - Fallback: if the secret is missing, a self-signed certificate with the manifest `Publisher` as subject is generated per run and `SyncDroidWinUI.cer` is attached to the release.
+- **Release assets**: `SyncDroid_<version>_<arch>_SelfContained.msix`, `SyncDroid_<version>_<arch>_FrameworkDependent.msix`, `SyncDroidWinUI.cer`, `Install-Certificate.bat`, `SHA256SUMS.txt`.
+- **Local equivalent** of the CI build:
+  ```powershell
+  dotnet build SyncDroidWinUI.csproj -c Release -r win-x64 /p:Platform=x64 `
+    /p:WindowsPackageType=MSIX /p:GenerateAppxPackageOnBuild=true `
+    /p:SelfContained=true /p:WindowsAppSDKSelfContained=true `
+    /p:AppxBundle=Never /p:UapAppxPackageBuildMode=SideloadOnly `
+    /p:AppxSymbolPackageEnabled=false /p:AppxPackageSigningEnabled=false `
+    "/p:AppxPackageDir=$env:TEMP\appx\"
+  ```
