@@ -26,13 +26,20 @@
                     </StackPanel>
                 </Button>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                <Grid Grid.Column="1" ColumnSpacing="10" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
                     <TextBlock
+                        Grid.Column="0"
                         Text="{Binding Loc.ManageDevicesPageTitle, Mode=OneWay}"
                         FontSize="20"
                         FontWeight="SemiBold"
+                        TextTrimming="CharacterEllipsis"
                         VerticalAlignment="Center"/>
                     <Border
+                        Grid.Column="1"
                         Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                         CornerRadius="6"
                         Padding="8,2"
@@ -45,7 +52,7 @@
                             FontWeight="SemiBold"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </Border>
-                </StackPanel>
+                </Grid>
 
                 <Button
                     Grid.Column="2"

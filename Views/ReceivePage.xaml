@@ -11,9 +11,9 @@
     <Grid Padding="12,10,12,14" RowSpacing="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="1.35*" MinHeight="200"/>
+            <RowDefinition Height="1.35*" MinHeight="150"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="0.9*" MinHeight="120"/>
+            <RowDefinition Height="0.9*" MinHeight="100"/>
         </Grid.RowDefinitions>
 
         <!-- Card 1: Sender Info, Save Directory & Pending Confirmation Banner -->
@@ -37,14 +37,20 @@
                         <TextBlock Text="{Binding Loc.ReceiveSenderLabel, Mode=OneWay}" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Grid Grid.Column="1" ColumnSpacing="8" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
                         <TextBlock
+                            Grid.Column="0"
                             x:Name="SenderDeviceText"
                             Text="{Binding Loc.ReceiveNoActiveSender, Mode=OneWay}"
                             FontWeight="SemiBold"
                             VerticalAlignment="Center"
                             TextTrimming="CharacterEllipsis"/>
                         <Border
+                            Grid.Column="1"
                             x:Name="ProtocolBadgeBorder"
                             Visibility="Collapsed"
                             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
@@ -59,7 +65,7 @@
                                 FontWeight="SemiBold"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
                         </Border>
-                    </StackPanel>
+                    </Grid>
 
                     <Button Grid.Column="2" Click="OpenReceiveFolder_Click" Padding="12,5">
                         <StackPanel Orientation="Horizontal" Spacing="6">
