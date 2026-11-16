@@ -10,9 +10,9 @@
 
     <Grid Padding="12,10,12,14" RowSpacing="10">
         <Grid.RowDefinitions>
-            <RowDefinition Height="1.25*" MinHeight="220"/>
+            <RowDefinition Height="1.25*" MinHeight="180"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="1*" MinHeight="140"/>
+            <RowDefinition Height="1*" MinHeight="110"/>
         </Grid.RowDefinitions>
 
         <!-- Card 1: Transfer Queue + Target Device Path + Conflict Policy -->
@@ -183,9 +183,9 @@
                     <Grid ColumnSpacing="14">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
@@ -197,31 +197,37 @@
                             x:Name="ConflictSkipRadio"
                             Grid.Column="1"
                             GroupName="DirectConflictGroup"
-                            Content="{Binding Loc.ConflictSkipIdentical, Mode=OneWay}"
                             FontSize="12"
                             MinWidth="0"
                             Padding="6,0,0,0"
-                            Checked="ConflictRadio_Checked"/>
+                            VerticalAlignment="Center"
+                            Checked="ConflictRadio_Checked">
+                            <TextBlock Text="{Binding Loc.ConflictSkipIdentical, Mode=OneWay}" TextWrapping="Wrap"/>
+                        </RadioButton>
 
                         <RadioButton
                             x:Name="ConflictOverwriteRadio"
                             Grid.Column="2"
                             GroupName="DirectConflictGroup"
-                            Content="{Binding Loc.ConflictOverwrite, Mode=OneWay}"
                             FontSize="12"
                             MinWidth="0"
                             Padding="6,0,0,0"
-                            Checked="ConflictRadio_Checked"/>
+                            VerticalAlignment="Center"
+                            Checked="ConflictRadio_Checked">
+                            <TextBlock Text="{Binding Loc.ConflictOverwrite, Mode=OneWay}" TextWrapping="Wrap"/>
+                        </RadioButton>
 
                         <RadioButton
                             x:Name="ConflictKeepBothRadio"
                             Grid.Column="3"
                             GroupName="DirectConflictGroup"
-                            Content="{Binding Loc.ConflictKeepBoth, Mode=OneWay}"
                             FontSize="12"
                             MinWidth="0"
                             Padding="6,0,0,0"
-                            Checked="ConflictRadio_Checked"/>
+                            VerticalAlignment="Center"
+                            Checked="ConflictRadio_Checked">
+                            <TextBlock Text="{Binding Loc.ConflictKeepBoth, Mode=OneWay}" TextWrapping="Wrap"/>
+                        </RadioButton>
                     </Grid>
                 </Border>
             </Grid>
@@ -268,14 +274,22 @@
                         </Button>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Grid Grid.Column="1" ColumnSpacing="10" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
                         <TextBlock
+                            Grid.Column="0"
                             x:Name="TransferStatusText"
                             Text="{Binding Loc.StatusReady, Mode=OneWay}"
+                            HorizontalAlignment="Right"
                             VerticalAlignment="Center"
                             FontWeight="SemiBold"
+                            TextTrimming="CharacterEllipsis"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         <Border
+                            Grid.Column="1"
                             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                             CornerRadius="4"
                             Padding="8,3"
@@ -287,7 +301,7 @@
                                 FontSize="12"
                                 FontWeight="SemiBold"/>
                         </Border>
-                    </StackPanel>
+                    </Grid>
                 </Grid>
 
                 <ProgressBar x:Name="TransferProgressBar" Value="0" Maximum="100" MinHeight="6"/>

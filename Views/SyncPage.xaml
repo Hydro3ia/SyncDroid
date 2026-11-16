@@ -129,8 +129,8 @@
                     <Grid ColumnSpacing="16">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
@@ -140,21 +140,23 @@
 
                         <RadioButton
                             Grid.Column="1"
-                            Content="{Binding Loc.MirrorModeOption, Mode=OneWay}"
                             IsChecked="{Binding IsMirrorMode, Mode=TwoWay}"
                             FontSize="12"
                             MinWidth="0"
                             Padding="6,0,0,0"
-                            VerticalAlignment="Center"/>
+                            VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Loc.MirrorModeOption, Mode=OneWay}" TextWrapping="Wrap"/>
+                        </RadioButton>
 
                         <RadioButton
                             Grid.Column="2"
-                            Content="{Binding Loc.IncrementalModeOption, Mode=OneWay}"
                             IsChecked="{Binding IsIncrementalMode, Mode=TwoWay}"
                             FontSize="12"
                             MinWidth="0"
                             Padding="6,0,0,0"
-                            VerticalAlignment="Center"/>
+                            VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Loc.IncrementalModeOption, Mode=OneWay}" TextWrapping="Wrap"/>
+                        </RadioButton>
                     </Grid>
                 </Border>
             </Grid>
@@ -194,13 +196,21 @@
                         </Button>
                     </StackPanel>
 
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Grid Grid.Column="1" ColumnSpacing="10" VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
                         <TextBlock
+                            Grid.Column="0"
                             Text="{Binding StatusText, Mode=OneWay}"
+                            HorizontalAlignment="Right"
                             VerticalAlignment="Center"
                             FontWeight="SemiBold"
+                            TextTrimming="CharacterEllipsis"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         <Border
+                            Grid.Column="1"
                             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                             CornerRadius="4"
                             Padding="8,3"
@@ -211,7 +221,7 @@
                                 FontSize="12"
                                 FontWeight="SemiBold"/>
                         </Border>
-                    </StackPanel>
+                    </Grid>
                 </Grid>
 
                 <ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="100" MinHeight="6"/>

@@ -1,0 +1,81 @@
+name: Build Debug
+
+on:
+  push:
+    branches:
+      - 'fix/**'
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Target architecture'
+        type: choice
+        default: 'x64'
+        options:
+          - x64
+          - arm64
+          - both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  DOTNET_CLI_UI_LANGUAGE: 'en-US'
+  PROJECT_FILE: 'SyncDroidWinUI.csproj'
+
+jobs:
+  build-debug:
+    name: Build ${{ matrix.arch }} Debug
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: x64
+            rid: win-x64
+          - arch: arm64
+            platform: ARM64
+            rid: win-arm64
+    if: ${{ inputs.arch == 'both' || inputs.arch == '' || inputs.arch == matrix.arch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build Debug (${{ matrix.arch }})
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $outDir = Join-Path $env:RUNNER_TEMP "debug-${{ matrix.arch }}"
+          dotnet build $env:PROJECT_FILE `
+            -c Debug `
+            -r ${{ matrix.rid }} `
+            /p:Platform=${{ matrix.platform }} `
+            /p:OutputPath="$outDir\"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "dotnet build failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload Debug build artifact (${{ matrix.arch }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: SyncDroid-Debug-${{ matrix.arch }}
+          path: ${{ runner.temp }}/debug-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 7
